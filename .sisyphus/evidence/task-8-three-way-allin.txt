@@ -1,0 +1,6 @@
+Scenario 1 PASS: Simple pot
+Scenario 2 PASS: Three-way all-in
+Scenario 3 PASS: Split pot odd chip
+Scenario 4 PASS: Folded dead chips
+Scenario 5 PASS: Award side pots
+ALL SCENARIOS PASS
