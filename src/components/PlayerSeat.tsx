@@ -8,7 +8,7 @@ interface PlayerSeatProps {
   isCurrentPlayer: boolean;
   isActive: boolean;
   isDealer: boolean;
-  config: { smallBlind: number; bigBlind: number };
+  onRebuy?: () => void;
 }
 
 export const PlayerSeat: React.FC<PlayerSeatProps> = ({ 
@@ -17,7 +17,7 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
   isCurrentPlayer, 
   isActive, 
   isDealer, 
-  config 
+  onRebuy,
 }) => {
   if (!player) {
     return (
@@ -34,7 +34,7 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
   const seatClasses = `
     relative flex flex-col items-center
     ${player.isFolded ? 'opacity-50 grayscale hover:grayscale-0 transition-all' : 'opacity-100'}
-    ${!player.isConnected ? 'opacity-40 brightness-75' : ''}
+    ${!player.isConnected ? 'opacity-40 brightness-75 grayscale' : ''}
   `;
 
   return (
@@ -54,6 +54,15 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
         ${isCurrentPlayer ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-slate-900' : ''}
       `}>
         <span className="text-2xl font-bold text-white tracking-widest">{getInitials(player.displayName)}</span>
+
+        {!player.isConnected && (
+          <div
+            className="absolute left-1 top-1 w-4 h-4 rounded-full bg-red-600/90 text-white text-[10px] font-bold flex items-center justify-center shadow border border-red-900"
+            title="Disconnected"
+          >
+            x
+          </div>
+        )}
         
         {player.isAllIn && (
           <div className="absolute -bottom-2 bg-red-600 text-white text-[10px] uppercase font-bold px-2 py-0.5 rounded shadow-sm border border-red-800 tracking-wider z-20">
@@ -63,6 +72,18 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
         {!player.isConnected && (
           <div className="absolute -top-2 bg-gray-600/80 text-gray-200 text-[10px] uppercase font-bold px-2 py-0.5 rounded shadow-sm z-20 backdrop-blur border border-gray-500">
             Offline
+          </div>
+        )}
+
+        {isCurrentPlayer && player.chips === 0 && onRebuy && (
+          <div className="absolute inset-0 rounded-full bg-black/55 backdrop-blur-[1px] flex items-center justify-center z-30">
+            <button
+              type="button"
+              onClick={onRebuy}
+              className="px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-widest bg-emerald-600 hover:bg-emerald-500 text-white shadow border border-emerald-800/50"
+            >
+              Rebuy
+            </button>
           </div>
         )}
       </div>

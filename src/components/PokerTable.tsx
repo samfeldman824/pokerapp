@@ -8,9 +8,10 @@ interface PokerTableProps {
   gameState: ClientGameState;
   playerId: string;
   onAction: (action: PlayerAction) => void;
+  onRebuy?: () => void;
 }
 
-export function PokerTable({ gameState, playerId, onAction }: PokerTableProps) {
+export function PokerTable({ gameState, playerId, onAction, onRebuy }: PokerTableProps) {
   const currentPlayerSeatIndex = gameState.players.findIndex(p => p?.id === playerId);
   const isPlaying = currentPlayerSeatIndex >= 0;
   
@@ -63,7 +64,7 @@ export function PokerTable({ gameState, playerId, onAction }: PokerTableProps) {
                 isCurrentPlayer={player?.id === playerId}
                 isActive={gameState.activePlayerIndex === i}
                 isDealer={gameState.dealerIndex === i}
-                config={gameState.config}
+                onRebuy={player?.id === playerId && onRebuy ? () => onRebuy() : undefined}
               />
             </div>
           );

@@ -10,6 +10,7 @@ import {
 import {
   addPlayer,
   findPlayerByToken,
+  rebuyPlayer,
   markPlayerDisconnected,
   markPlayerReconnected,
   shouldAutoFoldDisconnected,
@@ -63,6 +64,8 @@ type GamePlayerPayload = {
 type PlayerActionPayload = GamePlayerPayload & {
   action: PlayerAction
 }
+
+type RebuyPayload = GamePlayerPayload
 
 type HandResultEvent = {
   gameId: string
@@ -516,6 +519,39 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
         }
 
         nextGame = scheduleActionTimer(io, nextGame)
+        gameStore.set(nextGame.id, nextGame)
+        await saveGame(nextGame)
+        await broadcastGameState(io, nextGame)
+      } catch (error) {
+        emitSocketError(socket, error)
+      }
+    })
+  })
+
+  socket.on('rebuy', (payload: RebuyPayload) => {
+    void gameStore.withLock(payload.gameId, async () => {
+      try {
+        const game = gameStore.get(payload.gameId)
+
+        if (!game) {
+          throw new Error('Game not found')
+        }
+
+        const player = game.players.find((candidate) => candidate.id === payload.playerId)
+
+        if (!player) {
+          throw new Error('Player not found')
+        }
+
+        if (game.phase !== GamePhase.Waiting && player.chips !== 0) {
+          throw new Error('Rebuy only allowed when busted')
+        }
+
+        if (game.phase !== GamePhase.Waiting && !isHandComplete(game)) {
+          throw new Error('Rebuy only allowed between hands')
+        }
+
+        const nextGame = player.chips === 0 ? rebuyPlayer(game, payload.playerId) : game
         gameStore.set(nextGame.id, nextGame)
         await saveGame(nextGame)
         await broadcastGameState(io, nextGame)

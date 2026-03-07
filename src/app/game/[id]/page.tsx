@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, FormEvent } from "react";
 import { useParams } from "next/navigation";
 import PokerTable from "@/components/PokerTable";
 import { HandResultOverlay } from "@/components/HandResultOverlay";
@@ -37,8 +37,56 @@ export default function GamePage() {
   const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
   const [showLedger, setShowLedger] = useState(false);
   const [activeHandResult, setActiveHandResult] = useState<ReturnType<typeof useGameSocket>["lastHandResult"]>(null);
+  const [connectionBanner, setConnectionBanner] = useState<
+    | {
+        tone: "warn" | "success";
+        message: string;
+      }
+    | null
+  >(null);
 
   const { gameState, playerId, isConnected, emit, lastHandResult } = useGameSocket(gameId);
+
+  const prevConnectedRef = useRef<boolean | null>(null);
+  const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (bannerTimeoutRef.current) {
+        clearTimeout(bannerTimeoutRef.current);
+        bannerTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (prevConnectedRef.current === null) {
+      prevConnectedRef.current = isConnected;
+      return;
+    }
+
+    const wasConnected = prevConnectedRef.current;
+    if (wasConnected && !isConnected) {
+      if (bannerTimeoutRef.current) {
+        clearTimeout(bannerTimeoutRef.current);
+        bannerTimeoutRef.current = null;
+      }
+      setConnectionBanner({ tone: "warn", message: "Connection lost — reconnecting..." });
+    }
+
+    if (!wasConnected && isConnected) {
+      if (bannerTimeoutRef.current) {
+        clearTimeout(bannerTimeoutRef.current);
+      }
+      setConnectionBanner({ tone: "success", message: "Reconnected!" });
+      bannerTimeoutRef.current = setTimeout(() => {
+        setConnectionBanner(null);
+        bannerTimeoutRef.current = null;
+      }, 2000);
+    }
+
+    prevConnectedRef.current = isConnected;
+  }, [isConnected]);
 
   useEffect(() => {
     async function fetchGameInfo() {
@@ -91,6 +139,11 @@ export default function GamePage() {
     if (!playerId) return;
 
     emit("player-action", { gameId, playerId, action });
+  }, [emit, gameId, playerId]);
+
+  const handleRebuy = useCallback(() => {
+    if (!playerId) return;
+    emit("rebuy", { gameId, playerId });
   }, [emit, gameId, playerId]);
 
   const handleJoinSubmit = (e: FormEvent) => {
@@ -250,15 +303,44 @@ export default function GamePage() {
           <div className="text-sm text-gray-400">
             Players: <span className="text-white font-medium">{gameState?.players.filter(Boolean).length || gameInfo?.playerCount || 0}/{gameInfo?.maxPlayers || 0}</span>
           </div>
-          
-          <div className="flex items-center space-x-2">
-            <div className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)]" : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]"}`}></div>
+
+          <div
+            className={
+              `flex items-center gap-2 rounded-full border px-3 py-1 ` +
+              (isConnected
+                ? "border-emerald-500/30 bg-emerald-950/20"
+                : "border-red-500/30 bg-red-950/20")
+            }
+          >
+            <div
+              className={
+                `w-2 h-2 rounded-full ` +
+                (isConnected
+                  ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)]"
+                  : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)] animate-pulse")
+              }
+            />
             <span className="text-xs text-gray-500 uppercase tracking-widest">
-              {isConnected ? "Connected" : "Disconnected"}
+              {isConnected ? "Connected" : "Reconnecting..."}
             </span>
           </div>
         </div>
       </header>
+
+      {connectionBanner && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 pointer-events-none">
+          <div
+            className={
+              "pointer-events-auto rounded-full border px-4 py-2 text-sm shadow-lg backdrop-blur " +
+              (connectionBanner.tone === "success"
+                ? "bg-emerald-950/70 border-emerald-500/30 text-emerald-200"
+                : "bg-amber-950/70 border-amber-500/30 text-amber-200")
+            }
+          >
+            {connectionBanner.message}
+          </div>
+        </div>
+      )}
 
       {isHost && (
         <div className="bg-gray-900/80 backdrop-blur border-b border-gray-800 px-6 py-3 flex items-center justify-between z-10">
@@ -295,7 +377,7 @@ export default function GamePage() {
         
         {gameState && playerId ? (
           <div className="w-full h-full p-4 relative z-10">
-            <PokerTable gameState={gameState} playerId={playerId} onAction={handleAction} />
+            <PokerTable gameState={gameState} playerId={playerId} onAction={handleAction} onRebuy={handleRebuy} />
           </div>
         ) : (
           !showJoinModal && (
