@@ -22,8 +22,8 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
   const [raiseAmount, setRaiseAmount] = useState<number>(minRaise);
 
   useEffect(() => {
-    setRaiseAmount(Math.min(minRaise, allInAmount));
-  }, [minRaise, allInAmount]);
+    setRaiseAmount(Math.min(currentBet + minRaise, allInAmount));
+  }, [minRaise, allInAmount, currentBet]);
 
   if (!player) return null;
   if (gameState.activePlayerIndex < 0) return null;
@@ -40,8 +40,18 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
   const handleCall = () => onAction({ type: ActionType.Call });
   const handleRaise = () => onAction({ type: ActionType.Raise, amount: raiseAmount });
 
+  const handleTimeout = () => {
+    if (canCheck) {
+      handleCheck();
+    } else if (canCall) {
+      handleCall();
+    } else {
+      handleFold();
+    }
+  };
+
   const setRaiseClamped = (val: number) => {
-    const clamped = Math.max(Math.min(minRaise, allInAmount), Math.min(val, allInAmount));
+    const clamped = Math.max(Math.min(currentBet + minRaise, allInAmount), Math.min(val, allInAmount));
     setRaiseAmount(clamped);
   };
 
@@ -67,7 +77,7 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
           <ActionTimer 
             timePerAction={gameState.config.timePerAction} 
             timerStart={gameState.timerStart} 
-            onTimeout={handleFold}
+            onTimeout={handleTimeout}
           />
         </div>
 
@@ -102,7 +112,7 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
             <div className="flex items-center gap-3">
               <input
                 type="range"
-                min={Math.min(minRaise, allInAmount)}
+                min={Math.min(currentBet + minRaise, allInAmount)}
                 max={allInAmount}
                 step={1}
                 value={raiseAmount}
@@ -113,7 +123,7 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-500/50 font-bold">$</span>
                 <input
                   type="number"
-                  min={Math.min(minRaise, allInAmount)}
+                  min={Math.min(currentBet + minRaise, allInAmount)}
                   max={allInAmount}
                   value={raiseAmount}
                   onChange={(e) => setRaiseClamped(Number(e.target.value))}

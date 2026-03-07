@@ -29,6 +29,7 @@ export class GameStore {
   }
 
   async withLock<T>(gameId: string, fn: () => Promise<T>): Promise<T> {
+    const LOCK_TIMEOUT_MS = 30_000
     const previousLock = this.locks.get(gameId) ?? Promise.resolve()
 
     let releaseLock: (() => void) | undefined
@@ -41,8 +42,12 @@ export class GameStore {
 
     await previousLock.catch(() => undefined)
 
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Lock timeout for game ' + gameId)), LOCK_TIMEOUT_MS)
+    )
+
     try {
-      return await fn()
+      return await Promise.race([fn(), timeoutPromise])
     } finally {
       releaseLock?.()
 

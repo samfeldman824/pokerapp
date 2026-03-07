@@ -71,41 +71,42 @@ function getRemainingPlayers(game: GameState): PlayerState[] {
   return getCurrentHandPlayers(game.players).filter(player => !player.isFolded)
 }
 
-function collectCurrentRoundBets(players: PlayerState[]): number {
-  return players.reduce((total, player) => total + player.bet, 0)
-}
-
 function awardUncontestedPot(game: GameState, winner: PlayerState): GameState {
-  const totalPot = game.pot + collectCurrentRoundBets(getCurrentHandPlayers(game.players))
+  // Collect all bets into pot representation using totalBetThisHand
+  // so side pots are properly respected
+  const handPlayers = getCurrentHandPlayers(game.players)
+  const potPlayers = handPlayers.map(player => ({
+    ...player,
+    bet: player.totalBetThisHand,
+  }))
+  const pots = calculatePots(potPlayers)
+
+  // Winner takes all pots they're eligible for (single remaining player wins everything)
+  const potAwards = pots.map((pot, potIndex) => ({
+    potIndex,
+    amount: pot.amount,
+    winnerIds: [winner.id],
+    handDescription: '',
+  }))
+
+  const updatedHandPlayers = distributePotWinnings(
+    handPlayers.map(p => ({ ...p, bet: 0 })),
+    pots,
+    potAwards.map(award => award.winnerIds),
+    game.dealerIndex
+  )
 
   return {
     ...game,
     phase: GamePhase.Showdown,
     pot: 0,
-    sidePots: [],
+    sidePots: pots,
     activePlayerIndex: -1,
     currentBet: 0,
     playersToAct: [],
     timerStart: null,
     actionTimerStart: null,
-    players: game.players.map(player => {
-      if (!isPlayerInCurrentHand(player)) {
-        return player
-      }
-
-      if (player.id === winner.id) {
-        return {
-          ...player,
-          chips: player.chips + totalPot,
-          bet: 0,
-        }
-      }
-
-      return {
-        ...player,
-        bet: 0,
-      }
-    }),
+    players: mergePlayers(game.players, updatedHandPlayers),
   }
 }
 

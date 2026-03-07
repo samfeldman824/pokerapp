@@ -7,22 +7,26 @@ import { games, handActions, handResults, hands, players } from './schema'
 
 export async function saveGame(game: GameState): Promise<void> {
   const createdAt = new Date()
+  const status = game.isPaused ? 'paused' : 'active'
+  const { deck: _deck, ...gameSnapshot } = game
 
   await db
     .insert(games)
     .values({
       id: game.id,
       config: game.config,
-      status: 'active',
+      status,
       hostPlayerId: game.hostPlayerId,
+      gameState: gameSnapshot,
       createdAt,
     })
     .onConflictDoUpdate({
       target: games.id,
       set: {
         config: game.config,
-        status: 'active',
+        status,
         hostPlayerId: game.hostPlayerId,
+        gameState: gameSnapshot,
       },
     })
 }
@@ -33,6 +37,7 @@ export async function loadPersistedGame(gameId: string): Promise<GameState | nul
       id: games.id,
       config: games.config,
       hostPlayerId: games.hostPlayerId,
+      gameState: games.gameState,
     })
     .from(games)
     .where(eq(games.id, gameId))
@@ -40,6 +45,14 @@ export async function loadPersistedGame(gameId: string): Promise<GameState | nul
 
   if (!gameRow) {
     return null
+  }
+
+  if (gameRow.gameState) {
+    const snapshot = gameRow.gameState as Omit<GameState, 'deck'>
+    return {
+      ...snapshot,
+      deck: [],
+    }
   }
 
   const playerRows = await db

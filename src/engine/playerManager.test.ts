@@ -9,6 +9,7 @@ import {
   markPlayerReconnected,
   rebuyPlayer,
   removePlayer,
+  shouldAutoFoldDisconnected,
 } from './playerManager'
 import { GameConfig, GameState } from './types'
 
@@ -79,5 +80,25 @@ describe('playerManager', () => {
     const rebought = rebuyPlayer(busted, added.playerId)
     const player = rebought.players.find(p => p.id === added.playerId)
     expect(player?.chips).toBe(500)
+  })
+
+  it('shouldAutoFoldDisconnected() returns false when connected, false before timeout, true after timeout', () => {
+    let game = makeLobby()
+    const added = addPlayer(game, 'A', 0)
+    game = added.game
+
+    expect(shouldAutoFoldDisconnected(game, added.playerId, Date.now(), 30_000)).toBe(false)
+
+    const justDisconnected = markPlayerDisconnected(game, added.playerId)
+    expect(shouldAutoFoldDisconnected(justDisconnected, added.playerId, Date.now(), 30_000)).toBe(false)
+
+    const longAgo = Date.now() - 31_000
+    const timedOut: GameState = {
+      ...justDisconnected,
+      players: justDisconnected.players.map(p =>
+        p.id === added.playerId ? { ...p, disconnectTime: longAgo } : p
+      ),
+    }
+    expect(shouldAutoFoldDisconnected(timedOut, added.playerId, Date.now(), 30_000)).toBe(true)
   })
 })

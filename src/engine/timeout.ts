@@ -2,12 +2,11 @@ import { ActionType, GameState } from './types'
 import { applyAction } from './betting'
 
 export function startActionTimer(game: GameState): GameState {
-  const timerStart = Date.now()
+  const actionTimerStart = Date.now()
 
   return {
     ...game,
-    timerStart,
-    actionTimerStart: timerStart,
+    actionTimerStart,
   }
 }
 
@@ -16,7 +15,7 @@ export function isTimedOut(game: GameState, now: number): boolean {
     return false
   }
 
-  const timerStart = game.timerStart ?? game.actionTimerStart
+  const timerStart = game.actionTimerStart ?? game.timerStart
   if (typeof timerStart !== 'number') {
     return false
   }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_CONFIG } from './constants'
-import { createGame, getPlayerView, getShowdownResults, handleAction, isHandComplete, startHand } from './gameController'
+import { advanceDealer, createGame, getPlayerView, getShowdownResults, handleAction, isHandComplete, startHand } from './gameController'
 import { makeGame } from './testUtils'
 import { ActionType, GamePhase, GameState, Rank, Suit } from './types'
 
@@ -155,5 +155,36 @@ describe('gameController', () => {
     expect(showdown.phase).toBe(GamePhase.Showdown)
     expect(bySeat(showdown, 0).chips).toBe(3)
     expect(bySeat(showdown, 1).chips).toBe(2)
+  })
+
+  it('advanceDealer() rotates dealer seat clockwise across multiple hands', () => {
+    const lobby = makeGame({ playerCount: 3 })
+
+    const hand1 = startHand(lobby)
+    expect(hand1.dealerIndex).toBe(0)
+
+    const hand2 = startHand({ ...hand1, phase: GamePhase.Showdown })
+    expect(hand2.dealerIndex).toBe(1)
+
+    const hand3 = startHand({ ...hand2, phase: GamePhase.Showdown })
+    expect(hand3.dealerIndex).toBe(2)
+
+    const hand4 = startHand({ ...hand3, phase: GamePhase.Showdown })
+    expect(hand4.dealerIndex).toBe(0)
+  })
+
+  it('advanceDealer() skips busted seats (0 chips) when rotating', () => {
+    const lobby = makeGame({ playerCount: 3 })
+    const p1 = bySeat(lobby, 1)
+    const lobbyWithBustedP1: GameState = {
+      ...lobby,
+      players: lobby.players.map(p => p.id === p1.id ? { ...p, chips: 0 } : p),
+    }
+
+    const hand1 = startHand(lobbyWithBustedP1)
+    expect(hand1.dealerIndex).toBe(0)
+
+    const hand2 = startHand({ ...hand1, phase: GamePhase.Showdown })
+    expect(hand2.dealerIndex).toBe(1)
   })
 })

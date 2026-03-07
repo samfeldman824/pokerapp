@@ -18,7 +18,8 @@ export function PokerTable({ gameState, playerId, onAction, onRebuy }: PokerTabl
   const getSeatPosition = (seatIndex: number) => {
     let offset = seatIndex;
     if (isPlaying) {
-      offset = (seatIndex - currentPlayerSeatIndex + 9) % 9;
+      const maxSeats = gameState.config.maxPlayers;
+      offset = (seatIndex - currentPlayerSeatIndex + maxSeats) % maxSeats;
     }
     
     const positions9 = [
@@ -38,6 +39,21 @@ export function PokerTable({ gameState, playerId, onAction, onRebuy }: PokerTabl
 
   const isTurn = gameState.activePlayerIndex === currentPlayerSeatIndex;
 
+  const seatedPlayers = gameState.players.filter(Boolean);
+  const maxSeats = gameState.config.maxPlayers;
+  const dealerSeat = gameState.dealerIndex;
+  const occupiedSeatSet = new Set(seatedPlayers.map(p => p!.seatIndex));
+  
+  function getNextOccupiedSeat(from: number): number {
+    for (let offset = 1; offset <= maxSeats; offset++) {
+      const seat = (from + offset) % maxSeats;
+      if (occupiedSeatSet.has(seat)) return seat;
+    }
+    return -1;
+  }
+  const sbSeat = seatedPlayers.length >= 2 ? getNextOccupiedSeat(dealerSeat) : -1;
+  const bbSeat = sbSeat !== -1 ? getNextOccupiedSeat(sbSeat) : -1;
+
   return (
     <div className="w-full h-full min-h-[600px] flex items-center justify-center bg-gray-950 p-8 font-sans">
       <div className="relative w-full max-w-6xl aspect-[2.2/1] bg-green-800 rounded-[200px] border-[16px] border-slate-800 shadow-[inset_0_0_80px_rgba(0,0,0,0.8),0_20px_40px_rgba(0,0,0,0.5)] flex items-center justify-center">
@@ -48,7 +64,7 @@ export function PokerTable({ gameState, playerId, onAction, onRebuy }: PokerTabl
           <CommunityCards cards={gameState.communityCards} phase={gameState.phase} />
         </div>
 
-        {Array.from({ length: 9 }).map((_, i) => {
+        {Array.from({ length: maxSeats }).map((_, i) => {
           const player = gameState.players[i] || null;
           const pos = getSeatPosition(i);
           
@@ -64,6 +80,8 @@ export function PokerTable({ gameState, playerId, onAction, onRebuy }: PokerTabl
                 isCurrentPlayer={player?.id === playerId}
                 isActive={gameState.activePlayerIndex === i}
                 isDealer={gameState.dealerIndex === i}
+                isSmallBlind={i === sbSeat}
+                isBigBlind={i === bbSeat}
                 onRebuy={player?.id === playerId && onRebuy ? () => onRebuy() : undefined}
               />
             </div>

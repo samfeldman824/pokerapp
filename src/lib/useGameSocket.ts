@@ -17,6 +17,7 @@ export function useGameSocket(gameId: string): {
   playerId: string | null
   isConnected: boolean
   lastHandResult: HandResultEvent | null
+  lastError: string | null
   emit: (event: string, data: unknown) => void
   registerPlayer: (playerId: string) => void
 } {
@@ -24,7 +25,7 @@ export function useGameSocket(gameId: string): {
   const [playerId, setPlayerId] = useState<string | null>(null)
   const [isConnected, setIsConnected] = useState<boolean>(socket.connected)
   const [lastHandResult, setLastHandResult] = useState<HandResultEvent | null>(null)
-  const [, setLastError] = useState<string | null>(null)
+  const [lastError, setLastError] = useState<string | null>(null)
 
   const emit = useCallback((event: string, data: unknown) => {
     socket.emit(event, data)
@@ -44,12 +45,21 @@ export function useGameSocket(gameId: string): {
     const storedPlayerId = localStorage.getItem(playerKey)
     if (storedPlayerId) setPlayerId(storedPlayerId)
 
-    const onConnect = () => setIsConnected(true)
+    const onConnect = () => {
+      setIsConnected(true)
+      const storedToken = localStorage.getItem(`poker_token_${gameId}`)
+      if (storedToken) {
+        socket.emit('join-game', { gameId, token: storedToken })
+      }
+    }
     const onDisconnect = () => setIsConnected(false)
 
-    const onJoined = (data: { playerId: string }) => {
+    const onJoined = (data: { playerId: string; token?: string }) => {
       localStorage.setItem(playerKey, data.playerId)
       setPlayerId(data.playerId)
+      if (data.token) {
+        localStorage.setItem(`poker_token_${gameId}`, data.token)
+      }
     }
 
     const onGameState = (state: ClientGameState) => {
@@ -97,6 +107,7 @@ export function useGameSocket(gameId: string): {
     playerId,
     isConnected,
     lastHandResult,
+    lastError,
     emit,
     registerPlayer,
   }

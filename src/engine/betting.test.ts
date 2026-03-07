@@ -110,4 +110,28 @@ describe('betting', () => {
 
     expect(next).toBe(0)
   })
+
+  it('applyAction() Call with all-in partial contribution caps at player chips and sets isAllIn', () => {
+    const base = withPreflop(makeGame({ playerCount: 2 }))
+    const sbChips = 50
+
+    const shortStackGame: GameState = {
+      ...base,
+      currentBet: 100,
+      activePlayerIndex: 0,
+      players: base.players.map((p, i) =>
+        i === 0
+          ? { ...p, chips: sbChips, bet: 0 }
+          : p
+      ),
+    }
+
+    const afterCall = applyAction(shortStackGame, { type: ActionType.Call })
+    const callingPlayer = atSeat(afterCall, 0)
+
+    expect(callingPlayer.chips).toBe(0)
+    expect(callingPlayer.bet).toBe(sbChips)
+    expect(callingPlayer.isAllIn).toBe(true)
+    expect(callingPlayer.totalBetThisHand).toBe(sbChips)
+  })
 })

@@ -46,6 +46,7 @@ import {
 const timers: Map<string, NodeJS.Timeout> = new Map()
 const activeHandIds: Map<string, string> = new Map()
 const handActionOrder: Map<string, number> = new Map()
+const disconnectTimers: Map<string, NodeJS.Timeout> = new Map()
 const DISCONNECT_AUTO_FOLD_DELAY_MS = 30_000
 
 type PlayerWithCards = PlayerState & { holeCards: [Card, Card] }
@@ -216,10 +217,13 @@ async function broadcastGameState(io: Server, game: GameState): Promise<void> {
 
   await Promise.all(
     sockets.map(async (roomSocket) => {
-      const socketInfo = getSocketInfo(roomSocket.id)
-      const playerId = socketInfo?.gameId === game.id ? socketInfo.playerId : ''
-
-      roomSocket.emit('game-state', getPlayerView(game, playerId))
+      try {
+        const socketInfo = getSocketInfo(roomSocket.id)
+        const playerId = socketInfo?.gameId === game.id ? socketInfo.playerId : ''
+        roomSocket.emit('game-state', getPlayerView(game, playerId))
+      } catch {
+        // Ignore errors from individual sockets
+      }
     })
   )
 }
@@ -354,6 +358,11 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
           const existingPlayer = findPlayerByToken(game, payload.token)
 
           if (existingPlayer) {
+            const pendingDisconnectTimer = disconnectTimers.get(existingPlayer.id)
+            if (pendingDisconnectTimer) {
+              clearTimeout(pendingDisconnectTimer)
+              disconnectTimers.delete(existingPlayer.id)
+            }
             const updatedGame = markPlayerReconnected(game, existingPlayer.id)
             gameStore.set(updatedGame.id, updatedGame)
             registerSocket(socket.id, updatedGame.id, existingPlayer.id)
@@ -384,7 +393,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
 
         await savePlayer(player, updatedGame.id)
         await saveGame(updatedGame)
-        socket.emit('joined', { playerId })
+        socket.emit('joined', { playerId, token: player.token })
         socket.emit('game-state', getPlayerView(updatedGame, playerId))
         await broadcastGameState(io, updatedGame)
       } catch (error) {
@@ -577,35 +586,58 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
           return
         }
 
-        const nextGame = markPlayerDisconnected(game, socketInfo.playerId)
-        gameStore.set(nextGame.id, nextGame)
+        let nextGame = markPlayerDisconnected(game, socketInfo.playerId)
 
+        // Reassign host if needed
+        if (nextGame.hostPlayerId === socketInfo.playerId) {
+          const newHost = nextGame.players.find(
+            p => p.id !== socketInfo.playerId && p.isConnected
+          )
+          if (newHost) {
+            nextGame = { ...nextGame, hostPlayerId: newHost.id }
+          }
+        }
+
+        gameStore.set(nextGame.id, nextGame)
         await saveGame(nextGame)
         await broadcastGameState(io, nextGame)
 
         const disconnectedPlayerId = socketInfo.playerId
         const disconnectedGameId = socketInfo.gameId
 
-        setTimeout(() => {
+        // Game eviction after 5 minutes if all players disconnected
+        if (nextGame.players.every(p => !p.isConnected)) {
+          setTimeout(() => {
+            const latestGame = gameStore.get(disconnectedGameId)
+            if (latestGame && latestGame.players.every(p => !p.isConnected)) {
+              gameStore.delete(disconnectedGameId)
+            }
+          }, 5 * 60 * 1000)
+        }
+
+        // Cancel any existing disconnect timer for this player
+        const existingDisconnectTimer = disconnectTimers.get(disconnectedPlayerId)
+        if (existingDisconnectTimer) {
+          clearTimeout(existingDisconnectTimer)
+        }
+
+        const disconnectTimer = setTimeout(() => {
+          disconnectTimers.delete(disconnectedPlayerId)
           void gameStore.withLock(disconnectedGameId, async () => {
             const latestGame = gameStore.get(disconnectedGameId)
-
-            if (!latestGame) {
-              return
-            }
-
+            if (!latestGame) return
             const actingPlayer = getActingPlayer(latestGame)
-
             if (
               actingPlayer?.id !== disconnectedPlayerId ||
               !shouldAutoFoldDisconnected(latestGame, disconnectedPlayerId, Date.now(), DISCONNECT_AUTO_FOLD_DELAY_MS)
             ) {
               return
             }
-
             await autoFoldCurrentPlayerLocked(io, latestGame, disconnectedPlayerId)
           })
         }, DISCONNECT_AUTO_FOLD_DELAY_MS)
+
+        disconnectTimers.set(disconnectedPlayerId, disconnectTimer)
       } catch {
         return
       }

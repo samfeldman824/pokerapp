@@ -281,19 +281,15 @@ describe('registerSocketHandlers (integration)', () => {
   })
 
   afterEach(async () => {
-    await Promise.all(
-      clients.map(async (client) => {
-        if (client.connected) {
-          client.disconnect()
-        }
-        client.close()
-      })
-    )
+    clients.forEach((client) => {
+      client.disconnect()
+      client.close()
+    })
 
-    io.close()
+    await io.disconnectSockets(true)
 
     await new Promise<void>((resolve, reject) => {
-      httpServer.close((error) => {
+      io.close((error) => {
         if (error) {
           reject(error)
           return
@@ -603,5 +599,31 @@ describe('registerSocketHandlers (integration)', () => {
 
     const disconnected = remainingState.players.find((p) => p !== null && p.id === p1)
     expect(disconnected?.isConnected).toBe(false)
+  })
+
+  it('disconnect: host disconnecting transfers host role to next connected player', async () => {
+    const gameId = seedGame()
+    gameIds.push(gameId)
+
+    const host = createClient(port)
+    const other = createClient(port)
+    clients.push(host, other)
+
+    const { playerId: hostId } = await joinGame(host, gameId, 'Host', 0)
+    await waitForEvent(host, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    await joinGame(other, gameId, 'Other', 1)
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    const stateAfterDisconnectP = waitForEvent(other, 'game-state')
+    host.disconnect()
+    const stateAfterDisconnect = await stateAfterDisconnectP
+
+    expect(stateAfterDisconnect.hostPlayerId).not.toBe(hostId)
+    const otherPlayer = stateAfterDisconnect.players.find(p => p !== null && p.id !== hostId)
+    expect(stateAfterDisconnect.hostPlayerId).toBe(otherPlayer?.id)
   })
 })

@@ -14,6 +14,7 @@ export const games = pgTable('games', {
   hostPlayerId: text('host_player_id'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   completedAt: timestamp('completed_at'),
+  gameState: jsonb('game_state'),
 })
 
 export const players = pgTable('players', {

@@ -110,8 +110,10 @@ export function awardPots(
       throw new Error(`No eligible evaluated hands for pot ${potIndex}`)
     }
 
-    const winningRawHands = new Set(Hand.winners(eligibleHands.map(hand => hand.raw)))
-    const winners = eligibleHands.filter(hand => winningRawHands.has(hand.raw))
+    const winningHandStrings = new Set(
+      Hand.winners(eligibleHands.map(hand => hand.raw)).map((h: Hand) => h.toString())
+    )
+    const winners = eligibleHands.filter(hand => winningHandStrings.has(hand.raw.toString()))
 
     if (winners.length === 0) {
       throw new Error(`Unable to determine winners for pot ${potIndex}`)

@@ -132,7 +132,10 @@ export default function GamePage() {
   }, [gameId]);
 
   useEffect(() => {
-    if (!isConnected || playerId) {
+    if (!isConnected) {
+      return;
+    }
+    if (playerId && gameState) {
       return;
     }
 

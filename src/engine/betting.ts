@@ -51,7 +51,7 @@ function getActiveSeatCount(game: GameState): number {
 }
 
 function getNextOccupiedSeat(game: GameState, fromSeat: number): number {
-  const seatCount = game.players.length
+  const seatCount = game.config.maxPlayers
 
   for (let offset = 1; offset <= seatCount; offset += 1) {
     const seatIndex = (fromSeat + offset) % seatCount
@@ -85,7 +85,7 @@ function getBlindSeats(game: GameState): { smallBlind: number; bigBlind: number 
 }
 
 function buildSeatOrder(game: GameState, startingSeat: number): number[] {
-  const seatCount = game.players.length
+  const seatCount = game.config.maxPlayers
   const order: number[] = []
 
   if (seatCount === 0 || startingSeat === -1) {
@@ -110,10 +110,10 @@ function getInitialRoundOrder(game: GameState): number[] {
       return []
     }
 
-    return buildSeatOrder(game, (bigBlind + 1) % game.players.length)
+    return buildSeatOrder(game, (bigBlind + 1) % game.config.maxPlayers)
   }
 
-  return buildSeatOrder(game, (game.dealerIndex + 1) % game.players.length)
+  return buildSeatOrder(game, (game.dealerIndex + 1) % game.config.maxPlayers)
 }
 
 function normalizePlayersToAct(game: GameState): number[] {
@@ -125,7 +125,7 @@ function normalizePlayersToAct(game: GameState): number[] {
 }
 
 function getOrderedResponders(game: GameState, actingSeat: number): number[] {
-  return buildSeatOrder(game, (actingSeat + 1) % game.players.length).filter(
+  return buildSeatOrder(game, (actingSeat + 1) % game.config.maxPlayers).filter(
     (seatIndex) => seatIndex !== actingSeat && canStillAct(getPlayerAtSeat(game, seatIndex))
   )
 }

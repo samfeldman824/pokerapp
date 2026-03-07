@@ -8,6 +8,8 @@ interface PlayerSeatProps {
   isCurrentPlayer: boolean;
   isActive: boolean;
   isDealer: boolean;
+  isSmallBlind?: boolean;
+  isBigBlind?: boolean;
   onRebuy?: () => void;
 }
 
@@ -17,6 +19,8 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
   isCurrentPlayer, 
   isActive, 
   isDealer, 
+  isSmallBlind,
+  isBigBlind,
   onRebuy,
 }) => {
   if (!player) {
@@ -48,21 +52,22 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
           D
         </div>
       )}
+      {isSmallBlind && (
+        <div className="absolute -left-3 top-0 w-6 h-6 rounded-full bg-blue-500 border-2 border-gray-900 shadow-md text-white font-bold text-xs flex items-center justify-center z-20">
+          S
+        </div>
+      )}
+      {isBigBlind && (
+        <div className="absolute -left-3 top-0 w-6 h-6 rounded-full bg-purple-500 border-2 border-gray-900 shadow-md text-white font-bold text-xs flex items-center justify-center z-20">
+          B
+        </div>
+      )}
 
       <div className={`w-20 h-20 rounded-full border-[3px] flex items-center justify-center z-10 shadow-lg relative bg-gradient-to-b from-slate-700 to-slate-900
         ${isActive ? 'border-amber-400' : 'border-slate-600'}
         ${isCurrentPlayer ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-slate-900' : ''}
       `}>
         <span className="text-2xl font-bold text-white tracking-widest">{getInitials(player.displayName)}</span>
-
-        {!player.isConnected && (
-          <div
-            className="absolute left-1 top-1 w-4 h-4 rounded-full bg-red-600/90 text-white text-[10px] font-bold flex items-center justify-center shadow border border-red-900"
-            title="Disconnected"
-          >
-            x
-          </div>
-        )}
         
         {player.isAllIn && (
           <div className="absolute -bottom-2 bg-red-600 text-white text-[10px] uppercase font-bold px-2 py-0.5 rounded shadow-sm border border-red-800 tracking-wider z-20">

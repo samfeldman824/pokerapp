@@ -177,6 +177,16 @@ export function rebuyPlayer(game: GameState, playerId: string): GameState {
     )
   }
 
+  // Prevent rebuy while player is actively in a hand
+  if (
+    player.holeCards !== null ||
+    player.totalBetThisHand > 0 ||
+    player.bet > 0 ||
+    player.isAllIn
+  ) {
+    throw new Error(`Player ${playerId} cannot rebuy during an active hand`)
+  }
+
   return {
     ...game,
     players: game.players.map(p =>
@@ -191,12 +201,12 @@ export function rebuyPlayer(game: GameState, playerId: string): GameState {
  * Returns active players (not folded, has chips or is all-in)
  */
 export function getActivePlayers(game: GameState): PlayerState[] {
-  return game.players.filter(p => !p.isFolded)
+  return game.players.filter(p => !p.isFolded && (p.isAllIn || p.chips > 0))
 }
 
 /**
  * Returns players who can still act (not folded, not all-in)
  */
 export function getActablePlayers(game: GameState): PlayerState[] {
-  return game.players.filter(p => !p.isFolded && !p.isAllIn)
+  return game.players.filter(p => !p.isFolded && !p.isAllIn && p.chips > 0)
 }
