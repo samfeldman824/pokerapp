@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import { GameState, PlayerState, GameConfig } from './types'
+import { GameState, PlayerState } from './types'
 
 /**
  * Creates a new player token for reconnection
@@ -66,6 +66,7 @@ export function addPlayer(
     isFolded: false,
     isAllIn: false,
     isConnected: true,
+    disconnectTime: null,
     seatIndex,
     token,
   }
@@ -118,10 +119,12 @@ export function markPlayerDisconnected(
   game: GameState,
   playerId: string
 ): GameState {
+  const disconnectTime = Date.now()
+
   return {
     ...game,
     players: game.players.map(p =>
-      p.id === playerId ? { ...p, isConnected: false } : p
+      p.id === playerId ? { ...p, isConnected: false, disconnectTime } : p
     ),
   }
 }
@@ -136,9 +139,27 @@ export function markPlayerReconnected(
   return {
     ...game,
     players: game.players.map(p =>
-      p.id === playerId ? { ...p, isConnected: true } : p
+      p.id === playerId ? { ...p, isConnected: true, disconnectTime: null } : p
     ),
   }
+}
+
+export function shouldAutoFoldDisconnected(
+  game: GameState,
+  playerId: string,
+  now: number,
+  disconnectTimeout: number = 30_000
+): boolean {
+  const player = findPlayerById(game, playerId)
+  if (!player || player.isConnected) {
+    return false
+  }
+
+  if (player.disconnectTime === null) {
+    return false
+  }
+
+  return now - player.disconnectTime > disconnectTimeout
 }
 
 /**
@@ -150,8 +171,10 @@ export function rebuyPlayer(game: GameState, playerId: string): GameState {
   if (!player) {
     throw new Error(`Player ${playerId} not found`)
   }
-  if (player.chips > 0) {
-    throw new Error(`Player ${playerId} still has chips — cannot rebuy`)
+  if (player.chips !== 0) {
+    throw new Error(
+      `Player ${playerId} has ${player.chips} chips — rebuy only allowed when busted`
+    )
   }
 
   return {
