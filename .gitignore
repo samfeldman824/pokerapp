@@ -1,2 +1,7 @@
-node_modules/*
-.sisyphus/*
+node_modules/
+.next/
+.env
+*.tsbuildinfo
+drizzle/
+.sisyphus/evidence/
+.sisyphus/notepads/
