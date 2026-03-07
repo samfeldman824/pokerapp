@@ -64,13 +64,13 @@ Build a fully functional, real-time multiplayer No-Limit Hold'em poker web app t
 - Test suites — Vitest unit tests + Playwright E2E
 
 ### Definition of Done
-- [ ] Two players can create a game, join via link, and play a complete hand of NL Hold'em
-- [ ] Side pots work correctly with 3+ player all-in scenarios
-- [ ] Player can refresh browser and rejoin their seat with correct stack
-- [ ] Host can configure blinds, starting stack, and time per action
-- [ ] Hand history is persisted in PostgreSQL
-- [ ] All Vitest tests pass: `bun test`
-- [ ] Playwright E2E passes: full game flow from creation to hand completion
+- [x] Two players can create a game, join via link, and play a complete hand of NL Hold'em
+- [x] Side pots work correctly with 3+ player all-in scenarios
+- [x] Player can refresh browser and rejoin their seat with correct stack
+- [x] Host can configure blinds, starting stack, and time per action
+- [x] Hand history is persisted in PostgreSQL
+- [x] All Vitest tests pass: `bun test`
+- [x] Playwright E2E passes: full game flow from creation to hand completion
 
 ### Must Have
 - Server-authoritative game logic (client sends actions, server validates and broadcasts)
@@ -2155,19 +2155,19 @@ Max Concurrent: 6 (Waves 1 & 4)
 
 > 4 review agents run in PARALLEL. ALL must APPROVE. Rejection → fix → re-run.
 
-- [ ] F1. **Plan Compliance Audit** — `oracle`
+- [x] F1. **Plan Compliance Audit** — `oracle`
   Read the plan end-to-end. For each "Must Have": verify implementation exists (read file, curl endpoint, run command). For each "Must NOT Have": search codebase for forbidden patterns — reject with file:line if found. Check evidence files exist in .sisyphus/evidence/. Compare deliverables against plan.
   Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
 
-- [ ] F2. **Code Quality Review** — `unspecified-high`
+- [x] F2. **Code Quality Review** — `unspecified-high`
   Run `tsc --noEmit` + linter + `bun test`. Review all changed files for: `as any`/`@ts-ignore`, empty catches, console.log in prod, commented-out code, unused imports. Check AI slop: excessive comments, over-abstraction, generic names (data/result/item/temp).
   Output: `Build [PASS/FAIL] | Lint [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | VERDICT`
 
-- [ ] F3. **Real Manual QA** — `unspecified-high` (+ `playwright` skill)
+- [x] F3. **Real Manual QA** — `unspecified-high` (+ `playwright` skill)
   Start from clean state. Execute EVERY QA scenario from EVERY task — follow exact steps, capture evidence. Test cross-task integration (features working together, not isolation). Test edge cases: empty state, invalid input, rapid actions. Save to `.sisyphus/evidence/final-qa/`.
   Output: `Scenarios [N/N pass] | Integration [N/N] | Edge Cases [N tested] | VERDICT`
 
-- [ ] F4. **Scope Fidelity Check** — `deep`
+- [x] F4. **Scope Fidelity Check** — `deep`
   For each task: read "What to do", read actual diff (git log/diff). Verify 1:1 — everything in spec was built (no missing), nothing beyond spec was built (no creep). Check "Must NOT do" compliance. Detect cross-task contamination: Task N touching Task M's files. Flag unaccounted changes.
   Output: `Tasks [N/N compliant] | Contamination [CLEAN/N issues] | Unaccounted [CLEAN/N files] | VERDICT`
 
@@ -2207,11 +2207,11 @@ bunx playwright test  # Expected: all tests pass
 ```
 
 ### Final Checklist
-- [ ] All "Must Have" present
-- [ ] All "Must NOT Have" absent
-- [ ] All Vitest tests pass
-- [ ] Playwright E2E passes
-- [ ] Two players can complete a full hand via separate browser tabs
-- [ ] Side pots calculated correctly
-- [ ] Player reconnection works after page refresh
-- [ ] Hand history saved to PostgreSQL
+- [x] All "Must Have" present
+- [x] All "Must NOT Have" absent
+- [x] All Vitest tests pass
+- [x] Playwright E2E passes
+- [x] Two players can complete a full hand via separate browser tabs
+- [x] Side pots calculated correctly
+- [x] Player reconnection works after page refresh
+- [x] Hand history saved to PostgreSQL

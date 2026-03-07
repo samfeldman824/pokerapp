@@ -47,12 +47,12 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
 
   const calcHalfPot = () => {
     const potWithCall = gameState.pot + callAmount;
-    setRaiseClamped(Math.floor(potWithCall / 2));
+    setRaiseClamped(currentBet + Math.floor(potWithCall / 2));
   };
 
   const calcPot = () => {
     const potWithCall = gameState.pot + callAmount;
-    setRaiseClamped(potWithCall);
+    setRaiseClamped(currentBet + potWithCall);
   };
 
   const calcAllIn = () => {

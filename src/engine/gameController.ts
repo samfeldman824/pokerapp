@@ -109,15 +109,20 @@ function awardUncontestedPot(game: GameState, winner: PlayerState): GameState {
   }
 }
 
-function distributePotWinnings(players: PlayerState[], pots: SidePot[], winnerIdsByPot: string[][]): PlayerState[] {
+function distributePotWinnings(players: PlayerState[], pots: SidePot[], winnerIdsByPot: string[][], dealerIndex: number): PlayerState[] {
   const playersById = new Map(players.map(player => [player.id, player]))
   const chipAdjustments = new Map<string, number>()
+  const numSeats = Math.max(...players.map(p => p.seatIndex)) + 1
 
   pots.forEach((pot, potIndex) => {
+    // Sort by seat position starting from the seat immediately left of dealer.
+    // The player left of dealer receives the odd chip on a split pot.
     const winnerIds = [...winnerIdsByPot[potIndex]].sort((left, right) => {
       const leftSeat = playersById.get(left)?.seatIndex ?? Number.MAX_SAFE_INTEGER
       const rightSeat = playersById.get(right)?.seatIndex ?? Number.MAX_SAFE_INTEGER
-      return leftSeat - rightSeat
+      const leftPos = (leftSeat - dealerIndex - 1 + numSeats) % numSeats
+      const rightPos = (rightSeat - dealerIndex - 1 + numSeats) % numSeats
+      return leftPos - rightPos
     })
 
     const { perPlayer, remainder } = splitPotEvenly(pot.amount, winnerIds.length)
@@ -280,7 +285,7 @@ export function getShowdownResults(game: GameState): GameState {
   )
 
   const potAwards = awardPots(pots, handEvaluations)
-  const updatedHandPlayers = distributePotWinnings(handPlayers, pots, potAwards.map(award => award.winnerIds))
+  const updatedHandPlayers = distributePotWinnings(handPlayers, pots, potAwards.map(award => award.winnerIds), game.dealerIndex)
 
   return {
     ...game,
