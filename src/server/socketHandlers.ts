@@ -354,6 +354,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
             gameStore.set(updatedGame.id, updatedGame)
             registerSocket(socket.id, updatedGame.id, existingPlayer.id)
             await saveGame(updatedGame)
+            socket.emit('joined', { playerId: existingPlayer.id })
             socket.emit('game-state', getPlayerView(updatedGame, existingPlayer.id))
             await broadcastGameState(io, updatedGame)
             return
@@ -379,6 +380,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
 
         await savePlayer(player, updatedGame.id)
         await saveGame(updatedGame)
+        socket.emit('joined', { playerId })
         socket.emit('game-state', getPlayerView(updatedGame, playerId))
         await broadcastGameState(io, updatedGame)
       } catch (error) {

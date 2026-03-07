@@ -116,11 +116,11 @@ export interface GameState {
   hostPlayerId: string             // player ID of the host
 }
 
-export type ClientPlayerState = Omit<PlayerState, 'holeCards'> & {
+export type ClientPlayerState = Omit<PlayerState, 'holeCards' | 'token'> & {
   holeCards: Card[] | null
 }
 
-// Client-safe version (hides other players' hole cards)
+// Client-safe version (hides other players' hole cards and strips server-only fields)
 export type ClientGameState = Omit<GameState, 'players' | 'deck'> & {
   players: (ClientPlayerState | null)[]
   deck?: never

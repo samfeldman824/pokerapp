@@ -1,0 +1,291 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+
+interface FormErrors {
+  hostDisplayName?: string;
+  hostSeatIndex?: string;
+  smallBlind?: string;
+  bigBlind?: string;
+  startingStack?: string;
+  timePerAction?: string;
+  maxPlayers?: string;
+  general?: string;
+}
+
+export default function CreateGamePage() {
+  const router = useRouter();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errors, setErrors] = useState<FormErrors>({});
+
+  const [formData, setFormData] = useState({
+    hostDisplayName: "",
+    hostSeatIndex: 0,
+    smallBlind: 1,
+    bigBlind: 2,
+    startingStack: 1000,
+    timePerAction: 30,
+    maxPlayers: 9,
+  });
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value, type } = e.target;
+    setFormData((prev) => ({
+      ...prev,
+      [name]: type === "number" ? Number(value) : value,
+    }));
+    // Clear field-specific error when user types
+    if (errors[name as keyof FormErrors]) {
+      setErrors((prev) => ({ ...prev, [name]: undefined, general: undefined }));
+    }
+  };
+
+  const validate = (): boolean => {
+    const newErrors: FormErrors = {};
+
+    if (!formData.hostDisplayName.trim()) {
+      newErrors.hostDisplayName = "Display name is required.";
+    } else if (formData.hostDisplayName.length > 20) {
+      newErrors.hostDisplayName = "Max 20 characters.";
+    }
+
+    if (formData.hostSeatIndex < 0 || formData.hostSeatIndex >= formData.maxPlayers) {
+      newErrors.hostSeatIndex = `Seat must be between 0 and ${formData.maxPlayers - 1}.`;
+    }
+
+    if (formData.smallBlind < 1) {
+      newErrors.smallBlind = "Must be at least 1.";
+    }
+
+    if (formData.bigBlind < 2) {
+      newErrors.bigBlind = "Must be at least 2.";
+    } else if (formData.bigBlind < formData.smallBlind * 2) {
+      newErrors.bigBlind = "Big blind must be at least 2x small blind.";
+    }
+
+    if (formData.startingStack < 20) {
+      newErrors.startingStack = "Must be at least 20.";
+    } else if (formData.startingStack < formData.bigBlind * 10) {
+      newErrors.startingStack = "Starting stack must be at least 10x big blind.";
+    }
+
+    if (formData.timePerAction < 0 || formData.timePerAction > 120) {
+      newErrors.timePerAction = "Must be between 0 and 120.";
+    }
+
+    if (formData.maxPlayers < 2 || formData.maxPlayers > 9) {
+      newErrors.maxPlayers = "Max players must be between 2 and 9.";
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validate()) return;
+
+    setIsSubmitting(true);
+    setErrors({});
+
+    try {
+      const res = await fetch("/api/games", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to create game");
+      }
+
+      if (data.gameId && data.hostToken) {
+        localStorage.setItem(`poker_token_${data.gameId}`, data.hostToken);
+        router.push(`/game/${data.gameId}`);
+      } else {
+        throw new Error("Invalid response from server");
+      }
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : "An unknown error occurred";
+      setErrors({ general: errorMessage });
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <main className="min-h-screen bg-zinc-950 text-zinc-300 relative overflow-hidden font-sans py-12 px-6">
+      {/* Atmosphere */}
+      <div className="absolute top-0 right-0 w-full h-full pointer-events-none bg-[radial-gradient(circle_at_100%_0%,#451a03,transparent_50%)] opacity-30"></div>
+      
+      <div className="max-w-xl mx-auto relative z-10">
+        <div className="mb-10">
+          <Link href="/" className="inline-flex items-center text-zinc-500 hover:text-amber-500 transition-colors text-sm uppercase tracking-widest font-semibold mb-6">
+            <span className="mr-2">←</span> Back to Lobby
+          </Link>
+          <h1 className="text-4xl md:text-5xl font-serif font-bold text-white tracking-tight">
+            Configure <span className="text-amber-500 italic">Table</span>
+          </h1>
+          <p className="text-zinc-500 mt-2 text-lg">Set the rules and deal the cards.</p>
+        </div>
+
+        <div className="bg-zinc-900/50 border border-zinc-800/80 p-8 shadow-2xl backdrop-blur-md">
+          {errors.general && (
+            <div className="mb-6 p-4 bg-red-950/50 border border-red-900/50 text-red-400 text-sm font-medium">
+              {errors.general}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-6">
+            
+            {/* Player Info Section */}
+            <div className="space-y-6 pb-6 border-b border-zinc-800/50">
+              <h2 className="text-xs uppercase tracking-widest text-emerald-500 font-bold mb-4">Player Details</h2>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label htmlFor="hostDisplayName" className="block text-sm font-medium text-zinc-400 mb-2">
+                    Your Name
+                  </label>
+                  <input
+                    type="text"
+                    id="hostDisplayName"
+                    name="hostDisplayName"
+                    value={formData.hostDisplayName}
+                    onChange={handleChange}
+                    placeholder="Enter your display name"
+                    className={`w-full bg-zinc-950/50 border ${errors.hostDisplayName ? 'border-red-500/50 focus:border-red-500' : 'border-zinc-800 focus:border-amber-500/50'} px-4 py-3 text-white placeholder-zinc-700 outline-none transition-colors`}
+                  />
+                  {errors.hostDisplayName && <p className="mt-1.5 text-xs text-red-500 font-medium">{errors.hostDisplayName}</p>}
+                </div>
+
+                <div>
+                  <label htmlFor="hostSeatIndex" className="block text-sm font-medium text-zinc-400 mb-2">
+                    Your Seat (0-{formData.maxPlayers - 1})
+                  </label>
+                  <input
+                    type="number"
+                    id="hostSeatIndex"
+                    name="hostSeatIndex"
+                    value={formData.hostSeatIndex}
+                    onChange={handleChange}
+                    min={0}
+                    max={formData.maxPlayers - 1}
+                    className={`w-full bg-zinc-950/50 border ${errors.hostSeatIndex ? 'border-red-500/50 focus:border-red-500' : 'border-zinc-800 focus:border-amber-500/50'} px-4 py-3 text-white outline-none transition-colors`}
+                  />
+                  {errors.hostSeatIndex && <p className="mt-1.5 text-xs text-red-500 font-medium">{errors.hostSeatIndex}</p>}
+                </div>
+              </div>
+            </div>
+
+            {/* Game Rules Section */}
+            <div className="space-y-6 pt-2">
+              <h2 className="text-xs uppercase tracking-widest text-amber-500 font-bold mb-4">Game Rules</h2>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label htmlFor="maxPlayers" className="block text-sm font-medium text-zinc-400 mb-2">
+                    Max Players
+                  </label>
+                  <input
+                    type="number"
+                    id="maxPlayers"
+                    name="maxPlayers"
+                    value={formData.maxPlayers}
+                    onChange={handleChange}
+                    min={2}
+                    max={9}
+                    className={`w-full bg-zinc-950/50 border ${errors.maxPlayers ? 'border-red-500/50 focus:border-red-500' : 'border-zinc-800 focus:border-amber-500/50'} px-4 py-3 text-white outline-none transition-colors`}
+                  />
+                  {errors.maxPlayers && <p className="mt-1.5 text-xs text-red-500 font-medium">{errors.maxPlayers}</p>}
+                </div>
+
+                <div>
+                  <label htmlFor="startingStack" className="block text-sm font-medium text-zinc-400 mb-2">
+                    Starting Stack
+                  </label>
+                  <input
+                    type="number"
+                    id="startingStack"
+                    name="startingStack"
+                    value={formData.startingStack}
+                    onChange={handleChange}
+                    min={20}
+                    className={`w-full bg-zinc-950/50 border ${errors.startingStack ? 'border-red-500/50 focus:border-red-500' : 'border-zinc-800 focus:border-amber-500/50'} px-4 py-3 text-white outline-none transition-colors`}
+                  />
+                  {errors.startingStack && <p className="mt-1.5 text-xs text-red-500 font-medium">{errors.startingStack}</p>}
+                </div>
+
+                <div>
+                  <label htmlFor="smallBlind" className="block text-sm font-medium text-zinc-400 mb-2">
+                    Small Blind
+                  </label>
+                  <input
+                    type="number"
+                    id="smallBlind"
+                    name="smallBlind"
+                    value={formData.smallBlind}
+                    onChange={handleChange}
+                    min={1}
+                    className={`w-full bg-zinc-950/50 border ${errors.smallBlind ? 'border-red-500/50 focus:border-red-500' : 'border-zinc-800 focus:border-amber-500/50'} px-4 py-3 text-white outline-none transition-colors`}
+                  />
+                  {errors.smallBlind && <p className="mt-1.5 text-xs text-red-500 font-medium">{errors.smallBlind}</p>}
+                </div>
+
+                <div>
+                  <label htmlFor="bigBlind" className="block text-sm font-medium text-zinc-400 mb-2">
+                    Big Blind
+                  </label>
+                  <input
+                    type="number"
+                    id="bigBlind"
+                    name="bigBlind"
+                    value={formData.bigBlind}
+                    onChange={handleChange}
+                    min={2}
+                    className={`w-full bg-zinc-950/50 border ${errors.bigBlind ? 'border-red-500/50 focus:border-red-500' : 'border-zinc-800 focus:border-amber-500/50'} px-4 py-3 text-white outline-none transition-colors`}
+                  />
+                  {errors.bigBlind && <p className="mt-1.5 text-xs text-red-500 font-medium">{errors.bigBlind}</p>}
+                </div>
+
+                <div className="md:col-span-2">
+                  <label htmlFor="timePerAction" className="block text-sm font-medium text-zinc-400 mb-2">
+                    Time Per Action (seconds, 0 = no limit)
+                  </label>
+                  <input
+                    type="number"
+                    id="timePerAction"
+                    name="timePerAction"
+                    value={formData.timePerAction}
+                    onChange={handleChange}
+                    min={0}
+                    max={120}
+                    className={`w-full bg-zinc-950/50 border ${errors.timePerAction ? 'border-red-500/50 focus:border-red-500' : 'border-zinc-800 focus:border-amber-500/50'} px-4 py-3 text-white outline-none transition-colors`}
+                  />
+                  {errors.timePerAction && <p className="mt-1.5 text-xs text-red-500 font-medium">{errors.timePerAction}</p>}
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-6">
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full relative group flex items-center justify-center px-8 py-4 font-bold text-zinc-950 bg-amber-500 hover:bg-amber-400 transition-all duration-300 disabled:opacity-50 disabled:hover:bg-amber-500 disabled:cursor-not-allowed"
+              >
+                {!isSubmitting && <span className="absolute inset-0 border border-amber-300 scale-100 opacity-0 group-hover:opacity-100 group-hover:scale-[1.02] transition-all duration-300"></span>}
+                <span className="tracking-widest uppercase text-base">
+                  {isSubmitting ? "Creating..." : "Start Game"}
+                </span>
+              </button>
+            </div>
+            
+          </form>
+        </div>
+      </div>
+    </main>
+  );
+}
