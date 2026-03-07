@@ -81,6 +81,7 @@ export interface PlayerState {
   isFolded: boolean
   isAllIn: boolean
   isConnected: boolean
+  disconnectTime: number | null
   seatIndex: number                // 0-8
   token: string                    // reconnection token (server-side only)
 }
@@ -109,15 +110,20 @@ export interface GameState {
   handNumber: number               // increments each hand
   lastRaiseAmount: number          // for minimum re-raise calculation
   playersToAct?: number[]
+  timerStart: number | null
   actionTimerStart: number | null  // timestamp when current player's timer started
   isPaused: boolean
   hostPlayerId: string             // player ID of the host
 }
 
+export type ClientPlayerState = Omit<PlayerState, 'holeCards'> & {
+  holeCards: Card[] | null
+}
+
 // Client-safe version (hides other players' hole cards)
-export interface ClientGameState extends Omit<GameState, 'deck'> {
-  // deck is omitted entirely
-  // holeCards for other players will be null (hidden)
+export type ClientGameState = Omit<GameState, 'players' | 'deck'> & {
+  players: (ClientPlayerState | null)[]
+  deck?: never
 }
 
 export interface HandEvaluation {

@@ -1,0 +1,7 @@
+== npx tsc --noEmit ==
+
+== npx tsx /tmp/test-game-controller.ts ==
+startHand PASS
+getPlayerView PASS
+fold-to-winner PASS
+Game controller basic checks PASS
