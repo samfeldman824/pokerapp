@@ -1,5 +1,25 @@
 "use client";
 
+/**
+ * GamePage — /game/[id]
+ *
+ * The main game room. Orchestrates Socket.IO connection, join flow, and real-time gameplay UI.
+ *
+ * High-level flow on mount:
+ *   1. Fetch game metadata from REST (`/api/games/[id]`) to get config and occupied seats.
+ *   2. Check localStorage for a saved token (`poker_token_<gameId>`).
+ *      - Token found → queue a token-based join (returning player / host reconnect).
+ *      - No token    → show the join modal so the user can pick a name and seat.
+ *   3. Once the Socket.IO connection is established (`isConnected`), fire the queued join event.
+ *      The join is queued rather than sent immediately because the socket may not be ready yet.
+ *   4. After the server confirms the join (`gameState` + `playerId` are populated), hide the modal.
+ *   5. Hand result overlays and the session ledger are rendered as modal layers on top of the table.
+ *
+ * Connection resilience:
+ *   - A `connectionBanner` state surfaces disconnect/reconnect events to the user.
+ *   - On reconnect the pending join events re-fire automatically (see the isConnected useEffect).
+ */
+
 import { useCallback, useEffect, useRef, useState, FormEvent } from "react";
 import { useParams } from "next/navigation";
 import PokerTable from "@/components/PokerTable";
@@ -9,6 +29,7 @@ import { useGameSocket } from "@/lib/useGameSocket";
 import { PlayerAction } from "@/engine/types";
 import Link from "next/link";
 
+/** Shape of the REST game snapshot fetched on mount. */
 interface GameInfo {
   id: string;
   config: {
@@ -21,9 +42,11 @@ interface GameInfo {
   playerCount: number;
   maxPlayers: number;
   isPaused: boolean;
+  /** 0-indexed seat numbers already occupied — used to grey out seats in the join modal. */
   occupiedSeats: number[];
 }
 
+/** Payload queued when a new (non-token) player submits the join modal. */
 type PendingSeatJoin = {
   displayName: string;
   seatIndex: number;
@@ -33,18 +56,31 @@ export default function GamePage() {
   const params = useParams();
   const gameId = params.id as string;
 
+  // REST-fetched metadata (available before Socket.IO connects)
   const [gameInfo, setGameInfo] = useState<GameInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isJoining, setIsJoining] = useState(false);
 
+  // Join modal state
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
+
+  // Queued join payloads — held until the socket is ready, then sent in a useEffect
   const [pendingTokenJoin, setPendingTokenJoin] = useState<string | null>(null);
   const [pendingSeatJoin, setPendingSeatJoin] = useState<PendingSeatJoin | null>(null);
+
   const [showLedger, setShowLedger] = useState(false);
+
+  // Hand result overlay — kept in local state so it persists until dismissed,
+  // even if `lastHandResult` from the socket hook gets reset
   const [activeHandResult, setActiveHandResult] = useState<ReturnType<typeof useGameSocket>["lastHandResult"]>(null);
+
+  /**
+   * Transient banner shown at the top of the screen on disconnect/reconnect.
+   * Auto-dismissed after 2 s on successful reconnect.
+   */
   const [connectionBanner, setConnectionBanner] = useState<
     | {
         tone: "warn" | "success";
@@ -55,9 +91,12 @@ export default function GamePage() {
 
   const { gameState, playerId, isConnected, emit, lastHandResult } = useGameSocket(gameId);
 
+  // Tracks the previous connection state so we can detect transitions (connected→lost, lost→reconnected)
   const prevConnectedRef = useRef<boolean | null>(null);
+  // Holds the auto-dismiss timer for the "Reconnected!" banner
   const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Cleanup the auto-dismiss timer on unmount to avoid setState on unmounted component
   useEffect(() => {
     return () => {
       if (bannerTimeoutRef.current) {
@@ -67,6 +106,8 @@ export default function GamePage() {
     };
   }, []);
 
+  // Show/hide the connection banner on state transitions.
+  // We skip the very first render (prevConnectedRef === null) to avoid a spurious banner on load.
   useEffect(() => {
     if (prevConnectedRef.current === null) {
       prevConnectedRef.current = isConnected;
@@ -96,6 +137,7 @@ export default function GamePage() {
     prevConnectedRef.current = isConnected;
   }, [isConnected]);
 
+  // On mount: fetch game metadata and determine whether to show join modal or auto-join via token.
   useEffect(() => {
     async function fetchGameInfo() {
       try {
@@ -113,6 +155,8 @@ export default function GamePage() {
         const data = await res.json();
         setGameInfo(data);
 
+        // A saved token means this browser has previously joined (or is the host).
+        // Queue the token join; it will fire once the socket connects.
         const token = localStorage.getItem(`poker_token_${gameId}`);
         if (token) {
           setPendingTokenJoin(token);
@@ -131,6 +175,9 @@ export default function GamePage() {
     }
   }, [gameId]);
 
+  // Fire any queued join event once the socket becomes available.
+  // This also re-fires on reconnect, which is the desired behavior for resuming sessions.
+  // Guard: skip if already in game (playerId + gameState both set).
   useEffect(() => {
     if (!isConnected) {
       return;
@@ -152,6 +199,7 @@ export default function GamePage() {
     }
   }, [isConnected, gameId, emit, pendingSeatJoin, pendingTokenJoin, playerId]);
 
+  // Once the server confirms the join (gameState + playerId populated), clean up join UI state.
   useEffect(() => {
     if (gameState && playerId) {
       setShowJoinModal(false);
@@ -161,23 +209,35 @@ export default function GamePage() {
     }
   }, [gameState, playerId]);
 
+  // Capture hand results into local state so the overlay persists until the user dismisses it.
   useEffect(() => {
     if (lastHandResult) {
       setActiveHandResult(lastHandResult);
     }
   }, [lastHandResult]);
 
+  /**
+   * Sends a player action (fold, check, call, raise) to the server via Socket.IO.
+   * No-ops if the player ID is not yet known (shouldn't happen in practice once seated).
+   */
   const handleAction = useCallback((action: PlayerAction) => {
     if (!playerId) return;
 
     emit("player-action", { gameId, playerId, action });
   }, [emit, gameId, playerId]);
 
+  /**
+   * Requests a rebuy for the current player (top up chips to starting stack).
+   */
   const handleRebuy = useCallback(() => {
     if (!playerId) return;
     emit("rebuy", { gameId, playerId });
   }, [emit, gameId, playerId]);
 
+  /**
+   * Submits the join modal form. Queues a seat join; the socket useEffect will send it
+   * once connected (or immediately if already connected).
+   */
   const handleJoinSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!displayName.trim() || selectedSeat === null) return;
@@ -189,12 +249,14 @@ export default function GamePage() {
     });
   };
 
+  /** Emits `start-game` — only the host should have access to this button (enforced in UI). */
   const handleStartGame = () => {
     if (!playerId) return;
 
     emit("start-game", { gameId, playerId });
   };
 
+  /** Toggles game pause/resume. The server validates that the emitter is the host. */
   const handlePauseResume = () => {
     if (!playerId) return;
 
@@ -227,6 +289,12 @@ export default function GamePage() {
     );
   }
 
+  /**
+   * Renders the seat-selection modal for new players.
+   *
+   * Seat occupancy is determined from live Socket.IO state when available,
+   * falling back to the REST snapshot (`gameInfo.occupiedSeats`) before the socket connects.
+   */
   const renderJoinModal = () => {
     if (!gameInfo) return null;
 
@@ -317,6 +385,7 @@ export default function GamePage() {
     );
   };
 
+  // True only if the current player is the game host — gates host-only controls
   const isHost = gameState && playerId === gameState.hostPlayerId;
 
   return (

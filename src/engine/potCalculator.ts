@@ -1,3 +1,16 @@
+/**
+ * Side pot calculation and pot award logic.
+ *
+ * When one or more players are all-in for different amounts, the pot must be
+ * split into a main pot and one or more side pots. Each pot has a defined set
+ * of players eligible to win it.
+ *
+ * Example: Players A, B, C contribute 50, 100, 200 chips respectively.
+ *   - Main pot: 3 × 50 = 150 (A, B, C eligible)
+ *   - Side pot 1: 2 × 50 = 100 (B, C eligible — A can't win this)
+ *   - Side pot 2: 1 × 100 = 100 (C eligible — only C put in the top 100)
+ */
+
 import { Hand } from 'pokersolver'
 
 import { PlayerState, SidePot } from './types'
@@ -15,14 +28,32 @@ export interface PotAward {
   handDescription: string
 }
 
+/** Returns unique values sorted smallest → largest. */
 function uniqueSortedAscending(values: number[]): number[] {
   return [...new Set(values)].sort((a, b) => a - b)
 }
 
+/** Players who put chips in the pot (bet > 0). */
 function getContributingPlayers(players: PlayerState[]): PlayerState[] {
   return players.filter(player => player.bet > 0)
 }
 
+/**
+ * Splits contributions into a main pot and side pots based on all-in levels.
+ *
+ * Algorithm:
+ * 1. Collect all distinct all-in amounts (sorted ascending) — these are the
+ *    "level" boundaries that create new side pots.
+ * 2. For each level, every player who contributed at least that much contributes
+ *    `(level - previousLevel)` chips to this pot.
+ * 3. Any chips above the highest all-in level go into a final pot that only
+ *    non-all-in players are eligible to win.
+ *
+ * A player who folded is excluded from eligibility even if they contributed chips.
+ *
+ * @param players - must have `bet` set to the player's total contribution for
+ *   the hand (typically `totalBetThisHand`), NOT the current-street `bet`.
+ */
 export function calculatePots(players: PlayerState[]): SidePot[] {
   const contributingPlayers = getContributingPlayers(players)
 
@@ -30,6 +61,7 @@ export function calculatePots(players: PlayerState[]): SidePot[] {
     return []
   }
 
+  // Each distinct all-in amount creates a new pot boundary
   const allInLevels = uniqueSortedAscending(
     contributingPlayers
       .filter(player => player.isAllIn)
@@ -55,6 +87,7 @@ export function calculatePots(players: PlayerState[]): SidePot[] {
     previousLevel = level
   }
 
+  // The "overflow" pot: chips contributed above the highest all-in level
   const remainingAmount = contributingPlayers.reduce((total, player) => {
     return total + Math.max(0, player.bet - previousLevel)
   }, 0)
@@ -71,6 +104,13 @@ export function calculatePots(players: PlayerState[]): SidePot[] {
   return pots
 }
 
+/**
+ * Divides `amount` evenly among `winnerCount` winners.
+ * The remainder (odd chips) is returned separately so the caller can decide
+ * how to distribute them (typically one extra chip to the player left of dealer).
+ *
+ * @throws if `winnerCount` is zero or negative
+ */
 export function splitPotEvenly(amount: number, winnerCount: number): { perPlayer: number; remainder: number } {
   if (winnerCount <= 0) {
     throw new Error('winnerCount must be greater than 0')
@@ -82,6 +122,16 @@ export function splitPotEvenly(amount: number, winnerCount: number): { perPlayer
   }
 }
 
+/**
+ * Determines the winner(s) of each pot by comparing hand strengths.
+ *
+ * For each pot:
+ * 1. Filter `handEvaluations` to only the players eligible for that pot.
+ * 2. Use `pokersolver.Hand.winners()` to find the best hand(s) among them.
+ * 3. If multiple players tie, all are listed as winners (split pot).
+ *
+ * @throws if a pot has no eligible evaluated hands (data integrity error)
+ */
 export function awardPots(
   pots: SidePot[],
   handEvaluations: Map<string, HandEvaluationWithRaw>
@@ -110,6 +160,7 @@ export function awardPots(
       throw new Error(`No eligible evaluated hands for pot ${potIndex}`)
     }
 
+    // pokersolver.Hand.winners() handles ties and returns all winning hands
     const winningHandStrings = new Set(
       Hand.winners(eligibleHands.map(hand => hand.raw)).map((h: Hand) => h.toString())
     )

@@ -144,6 +144,11 @@ export function markPlayerReconnected(
   }
 }
 
+/**
+ * Returns true when a disconnected player has been away long enough to be
+ * auto-folded. The caller (socketHandlers) passes `Date.now()` and the
+ * configured timeout so this remains a pure, testable function.
+ */
 export function shouldAutoFoldDisconnected(
   game: GameState,
   playerId: string,

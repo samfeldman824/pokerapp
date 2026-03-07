@@ -1,3 +1,18 @@
+/**
+ * Shared constants for game configuration and server behaviour.
+ *
+ * `DEFAULT_CONFIG` — used by `createGame` when no config is provided, and as
+ * fallback values in the betting engine when individual config fields are missing.
+ *
+ * `CONFIG_LIMITS` — the absolute allowed range for each config field. Note that
+ * the API route (`/api/games`) enforces its own (narrower) validation; these
+ * limits exist for reference and potential future use in a shared validator.
+ *
+ * Timing constants — `DISCONNECT_TIMEOUT_MS` and `NEXT_HAND_DELAY_MS` are
+ * defined here for documentation but the actual values used at runtime are
+ * hardcoded in `socketHandlers.ts` (TODO: unify).
+ */
+
 import { GameConfig } from './types'
 
 export const DEFAULT_CONFIG: GameConfig = {
@@ -16,6 +31,11 @@ export const CONFIG_LIMITS = {
   maxPlayers: { min: 2, max: 9 },
 }
 
+/** How long a disconnected player has before being auto-folded (ms). */
 export const DISCONNECT_TIMEOUT_MS = 30_000
+
+/** Delay between hands at showdown before the next hand auto-starts (ms). */
 export const BETWEEN_HANDS_DELAY_MS = 3_000
+
+/** How long the hand result overlay is displayed on the client (ms). */
 export const HAND_RESULT_DISPLAY_MS = 5_000

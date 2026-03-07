@@ -1,9 +1,24 @@
 "use client";
 
+/**
+ * CreateGamePage — /create
+ *
+ * Form page that lets a user configure and start a new poker game.
+ *
+ * Responsibilities:
+ *   1. Collect game config (blinds, stack, table size, timer) and host details.
+ *   2. Client-side validate all fields before hitting the network.
+ *   3. POST to /api/games, receive { gameId, hostToken }.
+ *   4. Store the host token in localStorage so the game page can auto-authenticate
+ *      the host's Socket.IO connection without a login step.
+ *   5. Redirect to /game/[id].
+ */
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
+/** Field-level error map — keys match formData keys plus a `general` slot for network errors. */
 interface FormErrors {
   hostDisplayName?: string;
   hostSeatIndex?: string;
@@ -30,6 +45,11 @@ export default function CreateGamePage() {
     maxPlayers: 9,
   });
 
+  /**
+   * Generic change handler for all form inputs.
+   * Coerces number inputs to `number` type (HTML inputs always yield strings).
+   * Also clears the specific field's error as the user types, preventing stale error messages.
+   */
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type } = e.target;
     setFormData((prev) => ({
@@ -42,6 +62,21 @@ export default function CreateGamePage() {
     }
   };
 
+  /**
+   * Client-side validation. Mirrors the server-side rules in /api/games/route.ts
+   * so users get instant feedback without a round-trip.
+   *
+   * Rules:
+   *   - hostDisplayName: required, max 20 chars
+   *   - hostSeatIndex: must be within [0, maxPlayers)
+   *   - smallBlind: ≥ 1
+   *   - bigBlind: ≥ 2 and ≥ smallBlind * 2
+   *   - startingStack: ≥ 20 and ≥ bigBlind * 10
+   *   - timePerAction: 0–120 (0 = unlimited)
+   *   - maxPlayers: 2–9
+   *
+   * @returns true if all fields pass, false if any errors were set.
+   */
   const validate = (): boolean => {
     const newErrors: FormErrors = {};
 
@@ -83,6 +118,17 @@ export default function CreateGamePage() {
     return Object.keys(newErrors).length === 0;
   };
 
+  /**
+   * Form submit handler.
+   *
+   * Flow:
+   *   1. Run client-side validation; bail early on failure.
+   *   2. POST form data to /api/games.
+   *   3. On success, persist the host token to localStorage then navigate to the game.
+   *      The token key follows the pattern `poker_token_<gameId>` — the game page reads
+   *      it on mount to auto-authenticate this browser as the host via Socket.IO.
+   *   4. On failure, surface the server's error message in the `general` error slot.
+   */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate()) return;

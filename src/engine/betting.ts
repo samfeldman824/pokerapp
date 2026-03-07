@@ -1,8 +1,26 @@
+/**
+ * Core betting logic for a Texas Hold'em hand.
+ *
+ * This module operates on a "seat-indexed" GameState where `game.players` is a
+ * sparse array keyed by seat index (seats 0–maxPlayers-1 may be undefined).
+ * Callers in gameController.ts convert to/from this format via
+ * `toInternalGame` / `fromInternalGame` before delegating here.
+ *
+ * Round state is tracked through `game.playersToAct`: an ordered array of seat
+ * indices that still need to act this street. A round is complete when the
+ * list drains to empty (or only one player can still act).
+ */
+
 import { DEFAULT_CONFIG } from './constants'
 import { dealCards } from './deck'
 import { ActionType, GamePhase, GameState, PlayerAction, PlayerState } from './types'
 
+/** A seat may be empty (undefined) in the sparse players array. */
 type SeatedPlayer = PlayerState | undefined
+
+// ---------------------------------------------------------------------------
+// Config helpers
+// ---------------------------------------------------------------------------
 
 function getConfiguredSmallBlind(game: GameState): number {
   return game.config.smallBlind ?? DEFAULT_CONFIG.smallBlind
@@ -12,6 +30,10 @@ function getConfiguredBigBlind(game: GameState): number {
   return game.config.bigBlind ?? DEFAULT_CONFIG.bigBlind
 }
 
+/**
+ * Returns the current highest bet on the table.
+ * Reads `game.currentBet` when set; otherwise scans all players.
+ */
 function getCurrentBet(game: GameState): number {
   if (typeof game.currentBet === 'number') {
     return game.currentBet
@@ -26,10 +48,19 @@ function getCurrentBet(game: GameState): number {
   }, 0)
 }
 
+/**
+ * Returns the minimum valid raise SIZE (i.e., how much more than the current
+ * bet the total raise must be). Defaults to the big blind if nothing set yet.
+ */
 function getMinRaise(game: GameState): number {
   return game.minRaise ?? game.lastRaiseAmount ?? getConfiguredBigBlind(game)
 }
 
+// ---------------------------------------------------------------------------
+// Seat / player helpers
+// ---------------------------------------------------------------------------
+
+/** Filters out empty seats, returning only seated PlayerState objects. */
 function getSeatedPlayers(game: GameState): PlayerState[] {
   return game.players.filter((player): player is PlayerState => Boolean(player))
 }
@@ -38,18 +69,28 @@ function getPlayerAtSeat(game: GameState, seatIndex: number): SeatedPlayer {
   return game.players[seatIndex]
 }
 
+/**
+ * A player is eligible to act if they haven't folded and aren't all-in.
+ * (All-in players are still "in the hand" but cannot make further decisions.)
+ */
 function isEligibleToAct(player: SeatedPlayer): player is PlayerState {
   return player !== undefined && !player.isFolded && !player.isAllIn
 }
 
+/** A player can still act only if they're eligible AND have chips remaining. */
 function canStillAct(player: SeatedPlayer): boolean {
   return isEligibleToAct(player) && player.chips > 0
 }
 
+/** Counts how many seated players can still make a betting decision. */
 function getActiveSeatCount(game: GameState): number {
   return game.players.reduce((count, player) => count + (canStillAct(player) ? 1 : 0), 0)
 }
 
+/**
+ * Finds the next occupied seat (wrapping around) starting strictly after
+ * `fromSeat`. Returns -1 if no seat is found (shouldn't happen in a live game).
+ */
 function getNextOccupiedSeat(game: GameState, fromSeat: number): number {
   const seatCount = game.config.maxPlayers
 
@@ -63,6 +104,17 @@ function getNextOccupiedSeat(game: GameState, fromSeat: number): number {
   return -1
 }
 
+// ---------------------------------------------------------------------------
+// Blind positioning
+// ---------------------------------------------------------------------------
+
+/**
+ * Determines which seats post the small and big blinds.
+ *
+ * Heads-up rule: with exactly 2 players the dealer posts the small blind and
+ * acts first preflop, while the other player posts the big blind.
+ * With 3+ players the normal order applies: SB is one left of dealer, BB two left.
+ */
 function getBlindSeats(game: GameState): { smallBlind: number; bigBlind: number } {
   const seatedPlayers = getSeatedPlayers(game)
 
@@ -71,6 +123,7 @@ function getBlindSeats(game: GameState): { smallBlind: number; bigBlind: number 
   }
 
   if (seatedPlayers.length === 2) {
+    // Heads-up: dealer = small blind, other player = big blind
     const bigBlind = getNextOccupiedSeat(game, game.dealerIndex)
     return {
       smallBlind: game.dealerIndex,
@@ -84,6 +137,14 @@ function getBlindSeats(game: GameState): { smallBlind: number; bigBlind: number 
   return { smallBlind, bigBlind }
 }
 
+// ---------------------------------------------------------------------------
+// Action order helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns an ordered list of all seat indices starting at `startingSeat`,
+ * wrapping around the table. Includes empty seats — callers filter as needed.
+ */
 function buildSeatOrder(game: GameState, startingSeat: number): number[] {
   const seatCount = game.config.maxPlayers
   const order: number[] = []
@@ -99,6 +160,12 @@ function buildSeatOrder(game: GameState, startingSeat: number): number[] {
   return order
 }
 
+/**
+ * Returns the initial action order for the current street.
+ *
+ * Preflop: action starts one seat left of the big blind (UTG).
+ * All other streets: action starts one seat left of the dealer.
+ */
 function getInitialRoundOrder(game: GameState): number[] {
   if (getSeatedPlayers(game).length < 2) {
     return []
@@ -116,6 +183,11 @@ function getInitialRoundOrder(game: GameState): number[] {
   return buildSeatOrder(game, (game.dealerIndex + 1) % game.config.maxPlayers)
 }
 
+/**
+ * Returns the current `playersToAct` queue, normalised:
+ * - If `game.playersToAct` is already set, filters out seats that can no longer act.
+ * - Otherwise builds a fresh queue from the initial round order.
+ */
 function normalizePlayersToAct(game: GameState): number[] {
   if (Array.isArray(game.playersToAct)) {
     return game.playersToAct.filter((seatIndex) => canStillAct(getPlayerAtSeat(game, seatIndex)))
@@ -124,12 +196,25 @@ function normalizePlayersToAct(game: GameState): number[] {
   return getInitialRoundOrder(game).filter((seatIndex) => canStillAct(getPlayerAtSeat(game, seatIndex)))
 }
 
+/**
+ * After a raise, all other active players must respond.
+ * Returns the seats that need to act, in order starting left of the raiser,
+ * excluding the raiser themselves.
+ */
 function getOrderedResponders(game: GameState, actingSeat: number): number[] {
   return buildSeatOrder(game, (actingSeat + 1) % game.config.maxPlayers).filter(
     (seatIndex) => seatIndex !== actingSeat && canStillAct(getPlayerAtSeat(game, seatIndex))
   )
 }
 
+// ---------------------------------------------------------------------------
+// Chip movement helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Posts a forced bet (blind/ante) for a player, capped at their stack.
+ * Sets `isAllIn` if the player's entire stack is consumed.
+ */
 function postForcedBet(player: PlayerState, amount: number): PlayerState {
   const contribution = Math.min(player.chips, amount)
 
@@ -142,6 +227,7 @@ function postForcedBet(player: PlayerState, amount: number): PlayerState {
   }
 }
 
+/** Returns a new players array with the player at `seatIndex` replaced. */
 function replacePlayer(players: PlayerState[], seatIndex: number, updatedPlayer: PlayerState): PlayerState[] {
   return players.map((player, index) => (index === seatIndex ? updatedPlayer : player))
 }
@@ -150,11 +236,23 @@ function getPlayerById(game: GameState, playerId: string): PlayerState | undefin
   return getSeatedPlayers(game).find((player) => player.id === playerId)
 }
 
+/** Returns the first seat index still pending action, or -1 if the queue is empty. */
 function getNextPlayerFromPending(game: GameState): number {
   const pending = normalizePlayersToAct(game)
   return pending[0] ?? -1
 }
 
+// ---------------------------------------------------------------------------
+// Exported betting operations
+// ---------------------------------------------------------------------------
+
+/**
+ * Posts the small and big blinds at the start of a hand and initialises the
+ * `playersToAct` queue for the preflop betting round.
+ *
+ * The returned game has `activePlayerIndex` set to the first player to act
+ * (UTG in a multi-way pot; BB in heads-up).
+ */
 export function postBlinds(game: GameState): GameState {
   const { smallBlind, bigBlind } = getBlindSeats(game)
 
@@ -183,6 +281,7 @@ export function postBlinds(game: GameState): GameState {
   const postedBigBlind = postForcedBet(bigBlindPlayer, getConfiguredBigBlind(game))
   players = replacePlayer(players, bigBlind, postedBigBlind)
 
+  // currentBet is the larger of the two blind amounts (handles short stacks)
   const currentBet = Math.max(postedSmallBlind.bet, postedBigBlind.bet)
   const nextGame: GameState = {
     ...game,
@@ -201,10 +300,22 @@ export function postBlinds(game: GameState): GameState {
   }
 }
 
+/**
+ * Returns the seat index of the next player to act, or -1 if the round is over.
+ * Reads from the `playersToAct` queue.
+ */
 export function getNextActivePlayer(game: GameState): number {
   return getNextPlayerFromPending(game)
 }
 
+/**
+ * Validates a player action against the current game state.
+ *
+ * Checks: it's the player's turn, they haven't folded/gone all-in, and the
+ * action is legal (e.g., can't check facing a bet, raise must meet minimum size).
+ *
+ * @returns `{ valid: true }` on success, or `{ valid: false, reason }` on failure.
+ */
 export function validateAction(
   game: GameState,
   playerId: string,
@@ -259,6 +370,7 @@ export function validateAction(
 
       const raiseSize = action.amount - currentBet
       const isAllIn = contribution === player.chips
+      // All-in raises below the minimum are allowed (can't force a player to bet more than they have)
       if (raiseSize < minRaise && !isAllIn) {
         return { valid: false, reason: `Raise must be at least ${minRaise}` }
       }
@@ -268,6 +380,19 @@ export function validateAction(
   }
 }
 
+/**
+ * Applies a validated player action to the game state and advances the
+ * `playersToAct` queue.
+ *
+ * Key side effects of a raise:
+ * - `currentBet` is updated to the new highest bet.
+ * - `minRaise` / `lastRaiseAmount` are updated (only when the raise meets the
+ *   minimum — a sub-minimum all-in raise doesn't reopen the action).
+ * - `playersToAct` is rebuilt so all other active players must respond.
+ *
+ * Returns the updated game with `activePlayerIndex` pointing to the next seat,
+ * or -1 if no further action is required this round.
+ */
 export function applyAction(game: GameState, action: PlayerAction): GameState {
   const actingSeat = game.activePlayerIndex
   const actingPlayer = getPlayerAtSeat(game, actingSeat)
@@ -288,6 +413,7 @@ export function applyAction(game: GameState, action: PlayerAction): GameState {
   let currentBet = previousCurrentBet
   let minRaise = previousMinRaise
   let lastRaiseAmount = game.lastRaiseAmount ?? previousMinRaise
+  // Remove the acting player from the pending queue
   let playersToAct = pendingBeforeAction.filter((seatIndex) => seatIndex !== actingSeat)
 
   switch (action.type) {
@@ -298,8 +424,10 @@ export function applyAction(game: GameState, action: PlayerAction): GameState {
       }
       break
     case ActionType.Check:
+      // No chip movement; player simply passes
       break
     case ActionType.Call: {
+      // Call is capped at the player's remaining chips (all-in call)
       const contribution = Math.min(actingPlayer.chips, Math.max(0, previousCurrentBet - actingPlayer.bet))
       updatedPlayer = {
         ...actingPlayer,
@@ -324,6 +452,7 @@ export function applyAction(game: GameState, action: PlayerAction): GameState {
       currentBet = updatedPlayer.bet
 
       if (raiseSize >= previousMinRaise) {
+        // Full raise: update the minimum re-raise size and reopen action to all other players
         minRaise = raiseSize
         lastRaiseAmount = raiseSize
         playersToAct = getOrderedResponders(
@@ -334,6 +463,7 @@ export function applyAction(game: GameState, action: PlayerAction): GameState {
           actingSeat
         )
       }
+      // Sub-minimum all-in raise: action is NOT reopened (playersToAct unchanged)
 
       break
     }
@@ -349,6 +479,7 @@ export function applyAction(game: GameState, action: PlayerAction): GameState {
     playersToAct,
   }
 
+  // If only one player can still act (or the queue is empty), close action immediately
   const actionablePlayers = getActiveSeatCount(nextGame)
   if (actionablePlayers <= 1 || playersToAct.length === 0) {
     return {
@@ -364,6 +495,13 @@ export function applyAction(game: GameState, action: PlayerAction): GameState {
   }
 }
 
+/**
+ * Returns true when the current betting round is over.
+ *
+ * A round ends when:
+ * - Only one player can still act (everyone else folded or is all-in), OR
+ * - The `playersToAct` queue is empty (everyone has acted at the current bet level)
+ */
 export function isRoundComplete(game: GameState): boolean {
   if (getActiveSeatCount(game) <= 1) {
     return true
@@ -372,7 +510,16 @@ export function isRoundComplete(game: GameState): boolean {
   return normalizePlayersToAct(game).length === 0
 }
 
+/**
+ * Collects all bets into the pot and deals community cards for the next street.
+ *
+ * Street progression: Preflop → Flop (3 cards) → Turn (1 card) → River (1 card) → Showdown
+ *
+ * Resets per-street state: `bet` on each player, `currentBet`, `minRaise`,
+ * `playersToAct`, and rebuilds the action queue for the new street.
+ */
 export function advancePhase(game: GameState): GameState {
+  // Collect all outstanding bets into the pot
   const collectedBets = game.players.reduce((total, player) => total + (player?.bet ?? 0), 0)
   const players = game.players.map((player) => {
     if (!player) {

@@ -1,3 +1,19 @@
+/**
+ * POST /api/games
+ *
+ * Creates a new poker game and registers the host as the first player.
+ *
+ * Flow:
+ *   1. Validate all incoming config fields (blinds, stack, seats, timer).
+ *   2. Call `createGame` (engine) to build an in-memory game state.
+ *   3. Call `addPlayer` (engine) to seat the host and generate their auth token.
+ *   4. Persist both the game and host player to the database.
+ *   5. Register the game in the in-memory `gameStore` so Socket.IO can reach it instantly.
+ *   6. Return the game ID and host token to the client.
+ *      The client stores the token in localStorage under `poker_token_<gameId>` and
+ *      uses it to re-authenticate when reconnecting via Socket.IO.
+ */
+
 import { NextRequest, NextResponse } from 'next/server';
 import { createGame } from '@/engine/gameController';
 import { addPlayer, findPlayerById } from '@/engine/playerManager';
@@ -5,6 +21,22 @@ import { gameStore } from '@/server/gameStore';
 import { saveGame, savePlayer } from '@/db/persistence';
 import { GameConfig } from '@/engine/types';
 
+/**
+ * Handles game creation requests.
+ *
+ * @param req - Incoming Next.js request. Expects a JSON body with:
+ *   - `smallBlind`       {number} - Small blind amount (min 1)
+ *   - `bigBlind`         {number} - Big blind amount (min smallBlind * 2)
+ *   - `startingStack`    {number} - Each player's starting chip count (min bigBlind * 10)
+ *   - `timePerAction`    {number} - Seconds per player action; 0 means no limit (0–120)
+ *   - `maxPlayers`       {number} - Table size (2–9)
+ *   - `hostDisplayName`  {string} - The host's display name (non-empty)
+ *   - `hostSeatIndex`    {number} - Which seat (0-indexed) the host occupies
+ *
+ * @returns 201 with `{ gameId, hostToken }` on success.
+ *          400 with `{ error }` for any validation failure.
+ *          500 with `{ error }` if game creation throws unexpectedly.
+ */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -18,6 +50,8 @@ export async function POST(req: NextRequest) {
       hostSeatIndex 
     } = body;
 
+    // --- Input validation ---
+    // Each rule mirrors the engine constraints so errors surface before any state is created.
     if (typeof smallBlind !== 'number' || smallBlind < 1) {
       return NextResponse.json({ error: 'smallBlind must be at least 1' }, { status: 400 });
     }
@@ -48,13 +82,19 @@ export async function POST(req: NextRequest) {
       maxPlayers,
     };
 
+    // Build the initial game state (phase: "waiting", no hands dealt yet)
     let game = createGame(config);
 
+    // Seat the host and receive their opaque auth token.
+    // The token is a secret shared only with this player's browser — used to
+    // verify identity on Socket.IO reconnects without a login system.
     const { game: updatedGame, token, playerId } = addPlayer(game, hostDisplayName, hostSeatIndex);
     game = updatedGame;
 
+    // Mark this player as the game host so the client can render host controls
     game.hostPlayerId = playerId;
 
+    // Persist to DB so the game survives server restarts
     await saveGame(game);
     const hostPlayer = findPlayerById(game, playerId);
     if (!hostPlayer) {
@@ -62,6 +102,8 @@ export async function POST(req: NextRequest) {
     }
     await savePlayer(hostPlayer, game.id);
 
+    // Register in the in-memory store for immediate Socket.IO access
+    // (avoids an extra DB round-trip when the host's socket connects moments later)
     gameStore.set(game.id, game);
 
     return NextResponse.json({ 

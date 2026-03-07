@@ -1,3 +1,21 @@
+/**
+ * Custom HTTP server entry point — boots Next.js and Socket.IO on the same port.
+ *
+ * Next.js normally runs on its own internal server, but it doesn't support WebSockets
+ * out of the box. This file wraps Next.js in a plain Node.js `http.Server` so that
+ * Socket.IO can be attached to the same HTTP server and share port 3000.
+ *
+ * Flow:
+ *   1. `app.prepare()` compiles Next.js pages (or loads the production build).
+ *   2. A raw `http.Server` is created with Next.js as the request handler.
+ *   3. Socket.IO is attached to the same server.
+ *   4. Each new socket connection is handed to `registerSocketHandlers`.
+ *   5. The server starts listening on `PORT` (default 3000).
+ *
+ * This file is the production entry point (`bun start`) and the dev entry point
+ * (`bun dev` via `next dev --turbo` with a custom server flag in package.json).
+ */
+
 import { createServer } from 'http'
 import { parse } from 'url'
 import next from 'next'

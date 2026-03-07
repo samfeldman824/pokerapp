@@ -1,10 +1,22 @@
+/**
+ * Hand evaluation using the `pokersolver` library.
+ *
+ * `pokersolver` uses its own card string format: `{rank}{suit_initial}`
+ * (e.g., "As" = Ace of spades, "Th" = Ten of hearts, "2c" = Two of clubs).
+ * Our internal `Card` type uses longer suit strings ("spades", "clubs", etc.)
+ * and the rank characters defined in the `Rank` enum.
+ *
+ * This module handles the translation between the two formats and maps
+ * `pokersolver`'s text-based hand names to our `HandRank` numeric enum.
+ */
+
 import { Hand } from 'pokersolver'
 import { Card, HandEvaluation, HandRank, ComparisonResult, Suit, Rank } from './types'
 
-// pokersolver card format: rank + suit initial (e.g., "As" = Ace of spades, "Th" = Ten of hearts)
-// Our Rank enum: '2','3','4','5','6','7','8','9','T','J','Q','K','A'
-// Our Suit enum: 'clubs','diamonds','hearts','spades'
-
+/**
+ * Maps our internal Suit enum values to pokersolver's single-character suit codes.
+ * pokersolver expects: 'c' (clubs), 'd' (diamonds), 'h' (hearts), 's' (spades).
+ */
 const SUIT_MAP: Record<Suit, string> = {
   [Suit.Clubs]: 'c',
   [Suit.Diamonds]: 'd',
@@ -12,11 +24,18 @@ const SUIT_MAP: Record<Suit, string> = {
   [Suit.Spades]: 's',
 }
 
+/** Converts a `Card` to the pokersolver string format (e.g., { rank: 'A', suit: 'spades' } → "As"). */
 function cardToPokerSolver(card: Card): string {
   return `${card.rank}${SUIT_MAP[card.suit]}`
 }
 
-// Map pokersolver hand names to our HandRank enum
+/**
+ * Maps a pokersolver hand name + description to our `HandRank` enum.
+ *
+ * pokersolver returns hand strength as human-readable strings (e.g., "Flush", "Two Pair"),
+ * not as numeric ranks. We normalise by converting to lowercase and matching substrings.
+ * "Royal Flush" is checked before "Straight Flush" to avoid a false partial match.
+ */
 function descriptionToHandRank(name: string, descr?: string): HandRank {
   const lower = `${name} ${descr ?? ''}`.toLowerCase()
   if (lower.includes('royal flush')) return HandRank.RoyalFlush
@@ -32,7 +51,11 @@ function descriptionToHandRank(name: string, descr?: string): HandRank {
 }
 
 /**
- * Evaluates the best 5-card hand from hole cards + community cards (up to 7 total)
+ * Evaluates the best 5-card hand from hole cards + community cards (2–7 total).
+ *
+ * Use this when you only need the evaluation result (e.g., for display).
+ * Use `evaluateHandWithRaw` when you also need to compare multiple hands via
+ * `pokersolver.Hand.winners()`.
  */
 export function evaluateHand(
   holeCards: [Card, Card],
@@ -53,8 +76,13 @@ export function evaluateHand(
 }
 
 /**
- * Evaluates and returns both the HandEvaluation and the raw pokersolver hand
- * (raw hand needed for compareHands)
+ * Evaluates and returns both the `HandEvaluation` and the raw `pokersolver` Hand object.
+ *
+ * The raw Hand is needed for `Hand.winners()` comparisons in `potCalculator.ts`.
+ * Returning it here avoids solving the same hand twice (once for display, once for comparison).
+ *
+ * Note: `rawHand` is typed as `any` because `pokersolver` has no published TypeScript types;
+ * see `src/engine/pokersolver.d.ts` for the minimal declaration file.
  */
 export function evaluateHandWithRaw(
   holeCards: [Card, Card],
@@ -77,7 +105,10 @@ export function evaluateHandWithRaw(
 }
 
 /**
- * Compares multiple hands and returns winners (handles ties/split pots)
+ * Compares multiple hands and returns winners and losers.
+ * Handles ties (split pots) by including all winning hands in the `winners` array.
+ *
+ * Used when you already have pre-evaluated raw hands (avoids re-solving).
  */
 export function compareHands(
   hands: Array<{ playerId: string; evaluation: HandEvaluation; rawHand: any }>

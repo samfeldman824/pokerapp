@@ -37,7 +37,7 @@ function renderCards(cards: [PlayingCard, PlayingCard] | null) {
 
 export function HandResultOverlay({ results, players, onClose }: HandResultOverlayProps) {
   useEffect(() => {
-    const timeoutId = window.setTimeout(onClose, 8000)
+    const timeoutId = window.setTimeout(onClose, 2000)
 
     return () => {
       window.clearTimeout(timeoutId)
@@ -93,15 +93,7 @@ export function HandResultOverlay({ results, players, onClose }: HandResultOverl
           })}
         </div>
 
-        <div className="flex justify-end border-t border-white/10 px-6 py-4">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-amber-400/30 bg-amber-400/10 px-5 py-2 text-sm font-semibold uppercase tracking-[0.2em] text-amber-200 transition-colors hover:bg-amber-400/20"
-          >
-            Next Hand
-          </button>
-        </div>
+
       </div>
     </div>
   )

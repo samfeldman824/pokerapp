@@ -1,3 +1,17 @@
+/**
+ * Database persistence layer — Drizzle ORM queries for game, player, and hand data.
+ *
+ * All functions are fire-and-forget from the game engine's perspective: the engine
+ * works with pure in-memory `GameState` objects and delegates persistence to this
+ * module. `saveGame` uses upsert semantics so callers don't need to distinguish
+ * between insert and update.
+ *
+ * `gameState` column: the full `GameState` snapshot is stored as JSON (minus the
+ * deck, which is excluded to save space and because it can be regenerated).
+ * On load, `deck` is restored as an empty array; the game engine regenerates it
+ * at the start of each hand via `startHand`.
+ */
+
 import { eq } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import type { GameConfig, GameState, HandResult, PlayerState } from '../engine/types'
@@ -5,6 +19,11 @@ import { GamePhase } from '../engine/types'
 import { db } from './index'
 import { games, handActions, handResults, hands, players } from './schema'
 
+/**
+ * Upserts a game record. If the game already exists, updates config, status,
+ * host, and the full game state snapshot. The deck is excluded from the snapshot
+ * to avoid persisting a large array that can be regenerated on next `startHand`.
+ */
 export async function saveGame(game: GameState): Promise<void> {
   const createdAt = new Date()
   const status = game.isPaused ? 'paused' : 'active'
@@ -31,6 +50,17 @@ export async function saveGame(game: GameState): Promise<void> {
     })
 }
 
+/**
+ * Loads a game from the database by ID.
+ *
+ * Priority:
+ * 1. If a `gameState` JSON snapshot exists, deserialise it and return with
+ *    an empty deck (the most common path after the first save).
+ * 2. Otherwise, reconstruct a minimal Waiting-phase game from the `players`
+ *    table (legacy path for rows created before the snapshot column was added).
+ *
+ * Returns `null` if no row is found.
+ */
 export async function loadPersistedGame(gameId: string): Promise<GameState | null> {
   const [gameRow] = await db
     .select({
@@ -55,6 +85,7 @@ export async function loadPersistedGame(gameId: string): Promise<GameState | nul
     }
   }
 
+  // Legacy fallback: reconstruct from players table (no game snapshot saved yet)
   const playerRows = await db
     .select({
       id: players.id,
@@ -106,6 +137,10 @@ export async function loadPersistedGame(gameId: string): Promise<GameState | nul
   }
 }
 
+/**
+ * Upserts a player record. `chipsBroughtIn` records the starting stack at join
+ * time; `chipsCarriedOut` is updated separately when the session ends.
+ */
 export async function savePlayer(
   player: PlayerState,
   gameId: string,
@@ -133,6 +168,11 @@ export async function savePlayer(
     })
 }
 
+/**
+ * Inserts a new hand record at the start of each hand.
+ * Returns the generated hand ID, which is used as a foreign key for actions
+ * and results throughout the hand.
+ */
 export async function saveHand(game: GameState): Promise<string> {
   const handId = nanoid()
   const createdAt = new Date()
@@ -150,6 +190,11 @@ export async function saveHand(game: GameState): Promise<string> {
   return handId
 }
 
+/**
+ * Appends one player action to the hand history.
+ * `ordering` is a monotonically increasing counter so actions can be replayed
+ * in the correct sequence regardless of DB insertion order.
+ */
 export async function saveHandAction(
   handId: string,
   playerId: string,
@@ -168,6 +213,11 @@ export async function saveHandAction(
   })
 }
 
+/**
+ * Persists final results for all players in a hand and marks the hand as
+ * complete by setting `completedAt`. Runs in a transaction so the results
+ * insert and the timestamp update are atomic.
+ */
 export async function saveHandResults(
   handId: string,
   results: HandResult[],
@@ -195,6 +245,10 @@ export async function saveHandResults(
   })
 }
 
+/**
+ * Returns a buy-in / cash-out summary for every player in a session.
+ * `netResult` is null for players who are still active (haven't cashed out yet).
+ */
 export async function getSessionLedger(
   gameId: string,
 ): Promise<
@@ -225,6 +279,7 @@ export async function getSessionLedger(
   }))
 }
 
+/** Updates a player's final chip count when they leave the game. */
 export async function updatePlayerChipsCarriedOut(
   playerId: string,
   chips: number,
