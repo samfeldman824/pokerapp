@@ -37,6 +37,7 @@ import {
 } from '../db/persistence'
 import {
   gameStore,
+  getOrLoadGame,
   getSocketInfo,
   registerSocket,
   unregisterSocket,
@@ -341,7 +342,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
   socket.on('join-game', (payload: JoinGamePayload) => {
     void gameStore.withLock(payload.gameId, async () => {
       try {
-        const game = gameStore.get(payload.gameId)
+        const game = await getOrLoadGame(payload.gameId)
 
         if (!game) {
           throw new Error('Game not found')
@@ -387,6 +388,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
         socket.emit('game-state', getPlayerView(updatedGame, playerId))
         await broadcastGameState(io, updatedGame)
       } catch (error) {
+        console.error('join-game error', error)
         emitSocketError(socket, error)
       }
     })
@@ -395,7 +397,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
   socket.on('start-game', (payload: GamePlayerPayload) => {
     void gameStore.withLock(payload.gameId, async () => {
       try {
-        const game = gameStore.get(payload.gameId)
+        const game = await getOrLoadGame(payload.gameId)
 
         if (!game) {
           throw new Error('Game not found')
@@ -423,7 +425,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
   socket.on('player-action', (payload: PlayerActionPayload) => {
     void gameStore.withLock(payload.gameId, async () => {
       try {
-        const game = gameStore.get(payload.gameId)
+        const game = await getOrLoadGame(payload.gameId)
 
         if (!game) {
           throw new Error('Game not found')
@@ -474,7 +476,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
   socket.on('pause-game', (payload: GamePlayerPayload) => {
     void gameStore.withLock(payload.gameId, async () => {
       try {
-        const game = gameStore.get(payload.gameId)
+        const game = await getOrLoadGame(payload.gameId)
 
         if (!game) {
           throw new Error('Game not found')
@@ -503,7 +505,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
   socket.on('resume-game', (payload: GamePlayerPayload) => {
     void gameStore.withLock(payload.gameId, async () => {
       try {
-        const game = gameStore.get(payload.gameId)
+        const game = await getOrLoadGame(payload.gameId)
 
         if (!game) {
           throw new Error('Game not found')
@@ -531,7 +533,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
   socket.on('rebuy', (payload: RebuyPayload) => {
     void gameStore.withLock(payload.gameId, async () => {
       try {
-        const game = gameStore.get(payload.gameId)
+        const game = await getOrLoadGame(payload.gameId)
 
         if (!game) {
           throw new Error('Game not found')

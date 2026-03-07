@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { gameStore } from '@/server/gameStore';
+import { getOrLoadGame } from '@/server/gameStore';
 
 export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const { id } = params;
-  const game = gameStore.get(id);
+  const game = await getOrLoadGame(id);
 
   if (!game) {
     return NextResponse.json({ error: 'Game not found' }, { status: 404 });
@@ -19,5 +19,6 @@ export async function GET(
     playerCount: game.players.length,
     maxPlayers: game.config.maxPlayers,
     isPaused: game.isPaused,
+    occupiedSeats: game.players.map((player) => player.seatIndex),
   });
 }

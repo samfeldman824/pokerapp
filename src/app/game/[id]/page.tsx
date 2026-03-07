@@ -21,7 +21,13 @@ interface GameInfo {
   playerCount: number;
   maxPlayers: number;
   isPaused: boolean;
+  occupiedSeats: number[];
 }
+
+type PendingSeatJoin = {
+  displayName: string;
+  seatIndex: number;
+};
 
 export default function GamePage() {
   const params = useParams();
@@ -35,6 +41,8 @@ export default function GamePage() {
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
+  const [pendingTokenJoin, setPendingTokenJoin] = useState<string | null>(null);
+  const [pendingSeatJoin, setPendingSeatJoin] = useState<PendingSeatJoin | null>(null);
   const [showLedger, setShowLedger] = useState(false);
   const [activeHandResult, setActiveHandResult] = useState<ReturnType<typeof useGameSocket>["lastHandResult"]>(null);
   const [connectionBanner, setConnectionBanner] = useState<
@@ -107,7 +115,7 @@ export default function GamePage() {
 
         const token = localStorage.getItem(`poker_token_${gameId}`);
         if (token) {
-          emit("join-game", { gameId, token });
+          setPendingTokenJoin(token);
         } else {
           setShowJoinModal(true);
         }
@@ -121,11 +129,32 @@ export default function GamePage() {
     if (gameId) {
       fetchGameInfo();
     }
-  }, [gameId, emit]);
+  }, [gameId]);
+
+  useEffect(() => {
+    if (!isConnected || playerId) {
+      return;
+    }
+
+    if (pendingTokenJoin) {
+      emit("join-game", { gameId, token: pendingTokenJoin });
+    }
+
+    if (pendingSeatJoin) {
+      emit("join-game", {
+        gameId,
+        displayName: pendingSeatJoin.displayName,
+        seatIndex: pendingSeatJoin.seatIndex,
+      });
+    }
+  }, [isConnected, gameId, emit, pendingSeatJoin, pendingTokenJoin, playerId]);
 
   useEffect(() => {
     if (gameState && playerId) {
       setShowJoinModal(false);
+      setIsJoining(false);
+      setPendingSeatJoin(null);
+      setPendingTokenJoin(null);
     }
   }, [gameState, playerId]);
 
@@ -149,10 +178,9 @@ export default function GamePage() {
   const handleJoinSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!displayName.trim() || selectedSeat === null) return;
-    
+
     setIsJoining(true);
-    emit("join-game", {
-      gameId,
+    setPendingSeatJoin({
       displayName: displayName.trim(),
       seatIndex: selectedSeat,
     });
@@ -201,8 +229,11 @@ export default function GamePage() {
 
     const seats = Array.from({ length: gameInfo.maxPlayers }, (_, i) => i);
     const isSeatOccupied = (index: number) => {
-      if (!gameState) return false;
-      return gameState.players[index] !== null && gameState.players[index] !== undefined;
+      if (gameState) {
+        return gameState.players.some((player) => player?.seatIndex === index);
+      }
+
+      return gameInfo.occupiedSeats.includes(index);
     };
 
     return (
@@ -292,7 +323,7 @@ export default function GamePage() {
           <h1 className="font-bold text-white tracking-wider">
             GAME <span className="text-gray-500 font-mono text-sm ml-2">#{gameId.slice(0, 8)}</span>
           </h1>
-          {gameState?.phase === "waiting" && (
+          {(gameState?.phase ?? gameInfo?.phase) === "waiting" && (
             <span className="px-3 py-1 bg-yellow-900/30 text-yellow-500 border border-yellow-700/50 rounded-full text-xs font-medium animate-pulse">
               Waiting for host...
             </span>

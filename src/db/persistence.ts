@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
-import type { GameState, HandResult, PlayerState } from '../engine/types'
+import type { GameConfig, GameState, HandResult, PlayerState } from '../engine/types'
+import { GamePhase } from '../engine/types'
 import { db } from './index'
 import { games, handActions, handResults, hands, players } from './schema'
 
@@ -24,6 +25,72 @@ export async function saveGame(game: GameState): Promise<void> {
         hostPlayerId: game.hostPlayerId,
       },
     })
+}
+
+export async function loadPersistedGame(gameId: string): Promise<GameState | null> {
+  const [gameRow] = await db
+    .select({
+      id: games.id,
+      config: games.config,
+      hostPlayerId: games.hostPlayerId,
+    })
+    .from(games)
+    .where(eq(games.id, gameId))
+    .limit(1)
+
+  if (!gameRow) {
+    return null
+  }
+
+  const playerRows = await db
+    .select({
+      id: players.id,
+      displayName: players.displayName,
+      seatIndex: players.seatIndex,
+      token: players.token,
+      chipsBroughtIn: players.chipsBroughtIn,
+      leftAt: players.leftAt,
+    })
+    .from(players)
+    .where(eq(players.gameId, gameId))
+
+  const config = gameRow.config as GameConfig
+  const persistedPlayers: PlayerState[] = playerRows.map((player) => ({
+    id: player.id,
+    displayName: player.displayName,
+    chips: player.chipsBroughtIn,
+    holeCards: null,
+    bet: 0,
+    totalBetThisHand: 0,
+    isFolded: false,
+    isAllIn: false,
+    isConnected: false,
+    disconnectTime: null,
+    seatIndex: player.seatIndex,
+    token: player.token,
+  }))
+
+  return {
+    id: gameRow.id,
+    config,
+    phase: GamePhase.Waiting,
+    players: persistedPlayers,
+    communityCards: [],
+    pot: 0,
+    sidePots: [],
+    dealerIndex: -1,
+    activePlayerIndex: -1,
+    currentBet: 0,
+    minRaise: config.bigBlind,
+    deck: [],
+    handNumber: 0,
+    lastRaiseAmount: config.bigBlind,
+    playersToAct: [],
+    timerStart: null,
+    actionTimerStart: null,
+    isPaused: false,
+    hostPlayerId: gameRow.hostPlayerId ?? '',
+  }
 }
 
 export async function savePlayer(

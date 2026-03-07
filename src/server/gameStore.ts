@@ -1,4 +1,5 @@
 import { GameState } from '../engine/types'
+import { loadPersistedGame } from '../db/persistence'
 
 type SocketGameInfo = {
   gameId: string
@@ -53,6 +54,23 @@ export class GameStore {
 }
 
 export const gameStore = new GameStore()
+
+export async function getOrLoadGame(gameId: string): Promise<GameState | undefined> {
+  const existingGame = gameStore.get(gameId)
+
+  if (existingGame) {
+    return existingGame
+  }
+
+  const persistedGame = await loadPersistedGame(gameId)
+
+  if (persistedGame) {
+    gameStore.set(gameId, persistedGame)
+    return persistedGame
+  }
+
+  return undefined
+}
 
 const socketToGame: Map<string, SocketGameInfo> = new Map()
 

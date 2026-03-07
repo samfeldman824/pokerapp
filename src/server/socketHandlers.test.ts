@@ -6,6 +6,7 @@ vi.mock('../db/persistence', () => ({
   saveHand: vi.fn().mockResolvedValue('hand-id'),
   saveHandAction: vi.fn(),
   saveHandResults: vi.fn(),
+  loadPersistedGame: vi.fn().mockResolvedValue(null),
 }))
 
 import { randomUUID } from 'crypto'
