@@ -2,6 +2,7 @@ import { createServer } from 'http'
 import { parse } from 'url'
 import next from 'next'
 import { Server as SocketIOServer } from 'socket.io'
+import { registerSocketHandlers } from './src/server/socketHandlers'
 
 const dev = process.env.NODE_ENV !== 'production'
 const app = next({ dev, dir: '.' })
@@ -23,10 +24,7 @@ app.prepare().then(() => {
 
   io.on('connection', (socket) => {
     console.log('Socket connected:', socket.id)
-
-    socket.on('disconnect', () => {
-      console.log('Socket disconnected:', socket.id)
-    })
+    registerSocketHandlers(io, socket)
   })
 
   httpServer.listen(PORT, () => {
