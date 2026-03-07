@@ -1,16 +1,16 @@
-import { ClientGameState } from '@/engine/types';
+import { ClientGameState, PlayerAction } from '@/engine/types';
 import { PotDisplay } from './PotDisplay';
 import { CommunityCards } from './CommunityCards';
 import { PlayerSeat } from './PlayerSeat';
-// @ts-ignore
 import { ActionBar } from '@/components/ActionBar';
 
 interface PokerTableProps {
   gameState: ClientGameState;
   playerId: string;
+  onAction: (action: PlayerAction) => void;
 }
 
-export function PokerTable({ gameState, playerId }: PokerTableProps) {
+export function PokerTable({ gameState, playerId, onAction }: PokerTableProps) {
   const currentPlayerSeatIndex = gameState.players.findIndex(p => p?.id === playerId);
   const isPlaying = currentPlayerSeatIndex >= 0;
   
@@ -72,7 +72,7 @@ export function PokerTable({ gameState, playerId }: PokerTableProps) {
 
       {isTurn && (
         <div className="absolute bottom-8 w-full max-w-3xl z-50">
-          <ActionBar gameState={gameState} playerId={playerId} onAction={() => {}} />
+          <ActionBar gameState={gameState} playerId={playerId} onAction={onAction} />
         </div>
       )}
     </div>

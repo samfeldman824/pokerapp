@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useState, FormEvent } from "react";
+import { useCallback, useEffect, useState, FormEvent } from "react";
 import { useParams } from "next/navigation";
 import PokerTable from "@/components/PokerTable";
+import { HandResultOverlay } from "@/components/HandResultOverlay";
+import { SessionLedger } from "@/components/SessionLedger";
 import { useGameSocket } from "@/lib/useGameSocket";
+import { PlayerAction } from "@/engine/types";
 import Link from "next/link";
 
 interface GameInfo {
@@ -32,8 +35,10 @@ export default function GamePage() {
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
+  const [showLedger, setShowLedger] = useState(false);
+  const [activeHandResult, setActiveHandResult] = useState<ReturnType<typeof useGameSocket>["lastHandResult"]>(null);
 
-  const { gameState, playerId, isConnected, emit, registerPlayer } = useGameSocket(gameId);
+  const { gameState, playerId, isConnected, emit, lastHandResult } = useGameSocket(gameId);
 
   useEffect(() => {
     async function fetchGameInfo() {
@@ -76,6 +81,18 @@ export default function GamePage() {
     }
   }, [gameState, playerId]);
 
+  useEffect(() => {
+    if (lastHandResult) {
+      setActiveHandResult(lastHandResult);
+    }
+  }, [lastHandResult]);
+
+  const handleAction = useCallback((action: PlayerAction) => {
+    if (!playerId) return;
+
+    emit("player-action", { gameId, playerId, action });
+  }, [emit, gameId, playerId]);
+
   const handleJoinSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!displayName.trim() || selectedSeat === null) return;
@@ -89,14 +106,18 @@ export default function GamePage() {
   };
 
   const handleStartGame = () => {
-    emit("start-game", { gameId });
+    if (!playerId) return;
+
+    emit("start-game", { gameId, playerId });
   };
 
   const handlePauseResume = () => {
+    if (!playerId) return;
+
     if (gameState?.isPaused) {
-      emit("resume-game", { gameId });
+      emit("resume-game", { gameId, playerId });
     } else {
-      emit("pause-game", { gameId });
+      emit("pause-game", { gameId, playerId });
     }
   };
 
@@ -246,6 +267,12 @@ export default function GamePage() {
           </div>
           <div className="flex items-center space-x-3">
             <button
+              onClick={() => setShowLedger(true)}
+              className="px-4 py-1.5 bg-gray-800 hover:bg-gray-700 text-white text-sm font-medium rounded border border-gray-700 transition-colors"
+            >
+              Session Ledger
+            </button>
+            <button
               onClick={handleStartGame}
               disabled={gameState?.phase !== "waiting"}
               className="px-4 py-1.5 bg-green-600 hover:bg-green-500 disabled:bg-gray-800 disabled:text-gray-600 text-white text-sm font-medium rounded transition-colors"
@@ -268,7 +295,7 @@ export default function GamePage() {
         
         {gameState && playerId ? (
           <div className="w-full h-full p-4 relative z-10">
-            <PokerTable gameState={gameState} playerId={playerId} />
+            <PokerTable gameState={gameState} playerId={playerId} onAction={handleAction} />
           </div>
         ) : (
           !showJoinModal && (
@@ -278,6 +305,14 @@ export default function GamePage() {
       </main>
 
       {showJoinModal && renderJoinModal()}
+      {showLedger && <SessionLedger gameId={gameId} onClose={() => setShowLedger(false)} />}
+      {activeHandResult && gameState && (
+        <HandResultOverlay
+          results={activeHandResult.results}
+          players={gameState.players}
+          onClose={() => setActiveHandResult(null)}
+        />
+      )}
     </div>
   );
 }

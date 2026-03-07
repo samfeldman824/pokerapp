@@ -6,7 +6,7 @@ import type { ClientGameState, HandResult } from '@/engine/types'
 
 import { socket } from './socket'
 
-type HandResultEvent = {
+export type HandResultEvent = {
   gameId: string
   handNumber: number
   results: HandResult[]
@@ -16,13 +16,14 @@ export function useGameSocket(gameId: string): {
   gameState: ClientGameState | null
   playerId: string | null
   isConnected: boolean
+  lastHandResult: HandResultEvent | null
   emit: (event: string, data: unknown) => void
   registerPlayer: (playerId: string) => void
 } {
   const [gameState, setGameState] = useState<ClientGameState | null>(null)
   const [playerId, setPlayerId] = useState<string | null>(null)
   const [isConnected, setIsConnected] = useState<boolean>(socket.connected)
-  const [, setLastHandResult] = useState<HandResultEvent | null>(null)
+  const [lastHandResult, setLastHandResult] = useState<HandResultEvent | null>(null)
   const [, setLastError] = useState<string | null>(null)
 
   const emit = useCallback((event: string, data: unknown) => {
@@ -95,6 +96,7 @@ export function useGameSocket(gameId: string): {
     gameState,
     playerId,
     isConnected,
+    lastHandResult,
     emit,
     registerPlayer,
   }

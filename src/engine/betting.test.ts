@@ -1,0 +1,113 @@
+import { describe, expect, it } from 'vitest'
+
+import { applyAction, getNextActivePlayer, isRoundComplete, postBlinds, validateAction } from './betting'
+import { makeGame } from './testUtils'
+import { ActionType, GamePhase, GameState, PlayerState } from './types'
+
+function withPreflop(game: GameState): GameState {
+  return {
+    ...game,
+    phase: GamePhase.Preflop,
+    dealerIndex: 0,
+    currentBet: 0,
+    minRaise: game.config.bigBlind,
+    lastRaiseAmount: game.config.bigBlind,
+    playersToAct: [],
+    activePlayerIndex: -1,
+    pot: 0,
+    communityCards: [],
+    deck: [],
+    sidePots: [],
+    handNumber: 1,
+    timerStart: null,
+    actionTimerStart: null,
+    isPaused: false,
+    hostPlayerId: game.hostPlayerId,
+  }
+}
+
+function atSeat(game: GameState, seatIndex: number): PlayerState {
+  const player = game.players[seatIndex]
+  if (!player) {
+    throw new Error(`No player at seat ${seatIndex}`)
+  }
+  return player
+}
+
+describe('betting', () => {
+  it('postBlinds() posts SB/BB correctly for heads-up and 3+ players', () => {
+    const headsUp = withPreflop(makeGame({ playerCount: 2 }))
+    const huAfter = postBlinds(headsUp)
+
+    expect(atSeat(huAfter, 0).bet).toBe(huAfter.config.smallBlind)
+    expect(atSeat(huAfter, 1).bet).toBe(huAfter.config.bigBlind)
+    expect(huAfter.currentBet).toBe(huAfter.config.bigBlind)
+    expect(huAfter.activePlayerIndex).toBe(0)
+
+    const three = withPreflop(makeGame({ playerCount: 3 }))
+    const threeAfter = postBlinds(three)
+
+    expect(atSeat(threeAfter, 1).bet).toBe(threeAfter.config.smallBlind)
+    expect(atSeat(threeAfter, 2).bet).toBe(threeAfter.config.bigBlind)
+    expect(threeAfter.activePlayerIndex).toBe(0)
+  })
+
+  it('validateAction() validates fold/check/call/raise rules', () => {
+    const game = postBlinds(withPreflop(makeGame({ playerCount: 2 })))
+    const active = atSeat(game, game.activePlayerIndex)
+    const currentBet = game.currentBet ?? 0
+
+    expect(validateAction(game, active.id, { type: ActionType.Fold })).toEqual({ valid: true })
+
+    expect(validateAction(game, active.id, { type: ActionType.Check }).valid).toBe(false)
+    expect(validateAction(game, active.id, { type: ActionType.Call }).valid).toBe(true)
+
+    const minRaise = game.minRaise ?? game.config.bigBlind
+    expect(validateAction(game, active.id, { type: ActionType.Raise, amount: currentBet + minRaise }).valid).toBe(true)
+    expect(validateAction(game, active.id, { type: ActionType.Raise, amount: currentBet + minRaise - 1 }).valid).toBe(false)
+  })
+
+  it('applyAction() updates folded state, chips/bets, currentBet and minRaise', () => {
+    const base = postBlinds(withPreflop(makeGame({ playerCount: 2 })))
+    const sbSeat = base.activePlayerIndex
+
+    const folded = applyAction(base, { type: ActionType.Fold })
+    expect(atSeat(folded, sbSeat).isFolded).toBe(true)
+
+    const called = applyAction(base, { type: ActionType.Call })
+    const sbCalled = atSeat(called, sbSeat)
+    expect(sbCalled.bet).toBe(base.currentBet ?? 0)
+    expect(sbCalled.totalBetThisHand).toBe(base.config.smallBlind + (base.config.bigBlind - base.config.smallBlind))
+    expect(sbCalled.chips).toBe(base.config.startingStack - base.config.bigBlind)
+
+    const raiseAmount = (base.currentBet ?? 0) + base.config.bigBlind
+    const raised = applyAction(base, { type: ActionType.Raise, amount: raiseAmount })
+    expect(raised.currentBet).toBe(raiseAmount)
+    expect(raised.minRaise).toBe(base.config.bigBlind)
+  })
+
+  it('isRoundComplete() true when all active players have matched bet; false when player still to act', () => {
+    const afterBlinds = postBlinds(withPreflop(makeGame({ playerCount: 2 })))
+
+    const afterCall = applyAction(afterBlinds, { type: ActionType.Call })
+    expect(isRoundComplete(afterCall)).toBe(false)
+
+    const afterCheck = applyAction(afterCall, { type: ActionType.Check })
+    expect(isRoundComplete(afterCheck)).toBe(true)
+  })
+
+  it('getNextActivePlayer() skips folded and all-in players', () => {
+    const base = postBlinds(withPreflop(makeGame({ playerCount: 3 })))
+    const players = [...base.players]
+    players[1] = { ...atSeat(base, 1), isFolded: true }
+    players[2] = { ...atSeat(base, 2), isAllIn: true, chips: 0 }
+
+    const next = getNextActivePlayer({
+      ...base,
+      players,
+      playersToAct: [1, 2, 0],
+    })
+
+    expect(next).toBe(0)
+  })
+})

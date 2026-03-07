@@ -17,8 +17,8 @@ function cardToPokerSolver(card: Card): string {
 }
 
 // Map pokersolver hand names to our HandRank enum
-function descriptionToHandRank(name: string): HandRank {
-  const lower = name.toLowerCase()
+function descriptionToHandRank(name: string, descr?: string): HandRank {
+  const lower = `${name} ${descr ?? ''}`.toLowerCase()
   if (lower.includes('royal flush')) return HandRank.RoyalFlush
   if (lower.includes('straight flush')) return HandRank.StraightFlush
   if (lower.includes('four of a kind')) return HandRank.FourOfAKind
@@ -42,7 +42,7 @@ export function evaluateHand(
   const solved = Hand.solve(allCards)
 
   return {
-    rank: descriptionToHandRank(solved.name),
+    rank: descriptionToHandRank(solved.name, solved.descr),
     description: solved.descr,
     cards: solved.cards.map((c: any) => {
       const rankChar = c.value as Rank
@@ -64,7 +64,7 @@ export function evaluateHandWithRaw(
   const solved = Hand.solve(allCards)
 
   const evaluation: HandEvaluation = {
-    rank: descriptionToHandRank(solved.name),
+    rank: descriptionToHandRank(solved.name, solved.descr),
     description: solved.descr,
     cards: solved.cards.map((c: any) => {
       const rankChar = c.value as Rank
