@@ -103,9 +103,12 @@ export interface GameState {
   sidePots: SidePot[]
   dealerIndex: number              // seat index of dealer
   activePlayerIndex: number        // seat index of player to act (-1 if none)
+  currentBet?: number
+  minRaise?: number
   deck: Card[]                     // remaining deck (server-side only)
   handNumber: number               // increments each hand
   lastRaiseAmount: number          // for minimum re-raise calculation
+  playersToAct?: number[]
   actionTimerStart: number | null  // timestamp when current player's timer started
   isPaused: boolean
   hostPlayerId: string             // player ID of the host

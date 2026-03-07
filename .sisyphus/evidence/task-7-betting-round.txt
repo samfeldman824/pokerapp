@@ -1,0 +1,4 @@
+Scenario 1 passed
+Scenario 2 passed
+Scenario 3 passed
+All betting QA scenarios passed
