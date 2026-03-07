@@ -388,7 +388,6 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
         socket.emit('game-state', getPlayerView(updatedGame, playerId))
         await broadcastGameState(io, updatedGame)
       } catch (error) {
-        console.error('join-game error', error)
         emitSocketError(socket, error)
       }
     })
