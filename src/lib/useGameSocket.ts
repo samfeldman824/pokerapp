@@ -6,7 +6,7 @@
  * Responsibilities:
  * - Connect/disconnect the socket on mount/unmount.
  * - Re-authenticate automatically on reconnect using the stored token.
- * - Subscribe to server events (`joined`, `game-state`, `hand-result`, `error`).
+ * - Subscribe to server events (`joined`, `game-state`, `error`).
  * - Expose a stable `emit` callback and reactive state for the game page to consume.
  *
  * Token/player persistence (localStorage):
@@ -18,15 +18,9 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
-import type { ClientGameState, HandResult } from '@/engine/types'
+import type { ClientGameState } from '@/engine/types'
 
 import { socket } from './socket'
-
-export type HandResultEvent = {
-  gameId: string
-  handNumber: number
-  results: HandResult[]
-}
 
 /**
  * @param gameId - The game UUID from the URL. All events and storage keys are scoped to this ID.
@@ -35,7 +29,6 @@ export type HandResultEvent = {
  *   - `gameState`      Latest server-broadcasted game state for this player's view.
  *   - `playerId`       This player's ID (restored from localStorage if available).
  *   - `isConnected`    Live Socket.IO connection status.
- *   - `lastHandResult` Most recent hand result event (null until a hand completes).
  *   - `lastError`      Most recent server error message (null if none).
  *   - `emit`           Stable wrapper around `socket.emit` — safe to use in callbacks.
  *   - `registerPlayer` Manually set and persist a player ID (used after joining).
@@ -44,7 +37,6 @@ export function useGameSocket(gameId: string): {
   gameState: ClientGameState | null
   playerId: string | null
   isConnected: boolean
-  lastHandResult: HandResultEvent | null
   lastError: string | null
   emit: (event: string, data: unknown) => void
   registerPlayer: (playerId: string) => void
@@ -52,7 +44,6 @@ export function useGameSocket(gameId: string): {
   const [gameState, setGameState] = useState<ClientGameState | null>(null)
   const [playerId, setPlayerId] = useState<string | null>(null)
   const [isConnected, setIsConnected] = useState<boolean>(socket.connected)
-  const [lastHandResult, setLastHandResult] = useState<HandResultEvent | null>(null)
   const [lastError, setLastError] = useState<string | null>(null)
 
   const emit = useCallback((event: string, data: unknown) => {
@@ -120,11 +111,6 @@ export function useGameSocket(gameId: string): {
       })
     }
 
-    const onHandResult = (data: HandResultEvent) => {
-      if (data.gameId !== gameId) return
-      setLastHandResult(data)
-    }
-
     const onError = (data: { message: string }) => {
       setLastError(data.message)
     }
@@ -133,7 +119,6 @@ export function useGameSocket(gameId: string): {
     socket.on('disconnect', onDisconnect)
     socket.on('joined', onJoined)
     socket.on('game-state', onGameState)
-    socket.on('hand-result', onHandResult)
     socket.on('error', onError)
 
     socket.connect()
@@ -143,7 +128,6 @@ export function useGameSocket(gameId: string): {
       socket.off('disconnect', onDisconnect)
       socket.off('joined', onJoined)
       socket.off('game-state', onGameState)
-      socket.off('hand-result', onHandResult)
       socket.off('error', onError)
       socket.disconnect()
     }
@@ -153,7 +137,6 @@ export function useGameSocket(gameId: string): {
     gameState,
     playerId,
     isConnected,
-    lastHandResult,
     lastError,
     emit,
     registerPlayer,

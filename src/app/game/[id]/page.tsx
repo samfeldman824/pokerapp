@@ -13,7 +13,7 @@
  *   3. Once the Socket.IO connection is established (`isConnected`), fire the queued join event.
  *      The join is queued rather than sent immediately because the socket may not be ready yet.
  *   4. After the server confirms the join (`gameState` + `playerId` are populated), hide the modal.
- *   5. Hand result overlays and the session ledger are rendered as modal layers on top of the table.
+ *   5. The session ledger is rendered as a modal layer on top of the table.
  *
  * Connection resilience:
  *   - A `connectionBanner` state surfaces disconnect/reconnect events to the user.
@@ -23,7 +23,6 @@
 import { useCallback, useEffect, useRef, useState, FormEvent } from "react";
 import { useParams } from "next/navigation";
 import PokerTable from "@/components/PokerTable";
-import { HandResultOverlay } from "@/components/HandResultOverlay";
 import { SessionLedger } from "@/components/SessionLedger";
 import { useGameSocket } from "@/lib/useGameSocket";
 import { PlayerAction } from "@/engine/types";
@@ -73,10 +72,6 @@ export default function GamePage() {
 
   const [showLedger, setShowLedger] = useState(false);
 
-  // Hand result overlay — kept in local state so it persists until dismissed,
-  // even if `lastHandResult` from the socket hook gets reset
-  const [activeHandResult, setActiveHandResult] = useState<ReturnType<typeof useGameSocket>["lastHandResult"]>(null);
-
   /**
    * Transient banner shown at the top of the screen on disconnect/reconnect.
    * Auto-dismissed after 2 s on successful reconnect.
@@ -89,7 +84,7 @@ export default function GamePage() {
     | null
   >(null);
 
-  const { gameState, playerId, isConnected, emit, lastHandResult } = useGameSocket(gameId);
+  const { gameState, playerId, isConnected, emit } = useGameSocket(gameId);
 
   // Tracks the previous connection state so we can detect transitions (connected→lost, lost→reconnected)
   const prevConnectedRef = useRef<boolean | null>(null);
@@ -208,13 +203,6 @@ export default function GamePage() {
       setPendingTokenJoin(null);
     }
   }, [gameState, playerId]);
-
-  // Capture hand results into local state so the overlay persists until the user dismisses it.
-  useEffect(() => {
-    if (lastHandResult) {
-      setActiveHandResult(lastHandResult);
-    }
-  }, [lastHandResult]);
 
   /**
    * Sends a player action (fold, check, call, raise) to the server via Socket.IO.
@@ -491,13 +479,6 @@ export default function GamePage() {
 
       {showJoinModal && renderJoinModal()}
       {showLedger && <SessionLedger gameId={gameId} onClose={() => setShowLedger(false)} />}
-      {activeHandResult && gameState && (
-        <HandResultOverlay
-          results={activeHandResult.results}
-          players={gameState.players}
-          onClose={() => setActiveHandResult(null)}
-        />
-      )}
     </div>
   );
 }
