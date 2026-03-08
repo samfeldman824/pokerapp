@@ -11,7 +11,6 @@ interface PlayerSeatProps {
   isSmallBlind?: boolean;
   isBigBlind?: boolean;
   badgeAbove?: boolean;
-  onRebuy?: () => void;
 }
 
 export const PlayerSeat: React.FC<PlayerSeatProps> = ({ 
@@ -23,7 +22,6 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
   isSmallBlind,
   isBigBlind,
   badgeAbove = false,
-  onRebuy,
 }) => {
   if (!player) {
     return (
@@ -89,17 +87,7 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
           </div>
         )}
 
-        {isCurrentPlayer && player.chips === 0 && onRebuy && (
-          <div className="absolute inset-0 rounded-full bg-black/55 backdrop-blur-[1px] flex items-center justify-center z-30">
-            <button
-              type="button"
-              onClick={onRebuy}
-              className="px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-widest bg-emerald-600 hover:bg-emerald-500 text-white shadow border border-emerald-800/50"
-            >
-              Rebuy
-            </button>
-          </div>
-        )}
+
       </div>
 
       <div className={`absolute ${badgePositionClass} left-1/2 -translate-x-1/2 bg-slate-900/90 border border-slate-700/50 rounded-xl px-4 py-1.5 flex flex-col items-center shadow-md backdrop-blur-sm z-30 min-w-[100px] whitespace-nowrap`}>

@@ -215,14 +215,6 @@ export default function GamePage() {
   }, [emit, gameId, playerId]);
 
   /**
-   * Requests a rebuy for the current player (top up chips to starting stack).
-   */
-  const handleRebuy = useCallback(() => {
-    if (!playerId) return;
-    emit("rebuy", { gameId, playerId });
-  }, [emit, gameId, playerId]);
-
-  /**
    * Submits the join modal form. Queues a seat join; the socket useEffect will send it
    * once connected (or immediately if already connected).
    */
@@ -469,7 +461,7 @@ export default function GamePage() {
         
         {gameState && playerId ? (
           <div className="w-full h-full p-4 relative z-10">
-            <PokerTable gameState={gameState} playerId={playerId} onAction={handleAction} onRebuy={handleRebuy} />
+            <PokerTable gameState={gameState} playerId={playerId} onAction={handleAction} />
           </div>
         ) : (
           !showJoinModal && (
