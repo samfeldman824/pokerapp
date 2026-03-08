@@ -102,7 +102,9 @@ describe('gameController', () => {
     expect(tokenInView).toBe(false)
 
     const showdownView = getPlayerView({ ...started, phase: GamePhase.Showdown }, viewer.id)
-    expect(showdownView.players.every(p => p !== null && p.holeCards !== null)).toBe(true)
+    const showdownActivePlayers = showdownView.players.filter(Boolean)
+    expect(showdownActivePlayers.length).toBe(started.players.length)
+    expect(showdownActivePlayers.every(p => p!.holeCards !== null)).toBe(true)
   })
 
   it('splits odd pots with remainder to first player by seat', () => {

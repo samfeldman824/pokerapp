@@ -499,16 +499,23 @@ export function isHandComplete(game: GameState): boolean {
 export function getPlayerView(game: GameState, playerId: string): ClientGameState {
   const { deck: _deck, players, ...rest } = game
 
+  const seatIndexedPlayers: (ClientPlayerState | null)[] = Array.from(
+    { length: game.config.maxPlayers },
+    () => null,
+  )
+
+  for (const player of players) {
+    const { token: _token, holeCards, ...playerWithoutToken } = player
+    seatIndexedPlayers[player.seatIndex] = {
+      ...playerWithoutToken,
+      holeCards: game.phase === GamePhase.Showdown || player.id === playerId
+        ? holeCards
+        : null,
+    }
+  }
+
   return {
     ...rest,
-    players: players.map((player): ClientPlayerState => {
-      const { token: _token, holeCards, ...playerWithoutToken } = player
-      return {
-        ...playerWithoutToken,
-        holeCards: game.phase === GamePhase.Showdown || player.id === playerId
-          ? holeCards
-          : null,
-      }
-    }),
+    players: seatIndexedPlayers,
   }
 }

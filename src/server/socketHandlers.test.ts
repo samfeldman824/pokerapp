@@ -313,7 +313,7 @@ describe('registerSocketHandlers (integration)', () => {
     const c1InitialState = await waitForEvent(c1, 'game-state')
     await waitForEvent(c1, 'game-state')
     expect(c1InitialState.id).toBe(gameId)
-    expect(c1InitialState.players.length).toBe(1)
+    expect(c1InitialState.players.filter(Boolean).length).toBe(1)
 
     const { playerId: p2 } = await joinGame(c2, gameId, 'Bob', 1)
     expect(p2).not.toBe(p1)
@@ -321,8 +321,8 @@ describe('registerSocketHandlers (integration)', () => {
     const c2State = await waitForEvent(c2, 'game-state')
     await waitForEvent(c2, 'game-state')
     const c1AfterSecondJoinState = await waitForEvent(c1, 'game-state')
-    expect(c1AfterSecondJoinState.players.length).toBe(2)
-    expect(c2State.players.length).toBe(2)
+    expect(c1AfterSecondJoinState.players.filter(Boolean).length).toBe(2)
+    expect(c2State.players.filter(Boolean).length).toBe(2)
   })
 
   it('join-game: client with valid token reconnects and receives joined + game-state', async () => {
