@@ -67,7 +67,10 @@ export function PokerTable({ gameState, playerId, onAction, onRebuy }: PokerTabl
         {Array.from({ length: maxSeats }).map((_, i) => {
           const player = gameState.players[i] || null;
           const pos = getSeatPosition(i);
-          
+          const seatOffset = isPlaying
+            ? (i - currentPlayerSeatIndex + maxSeats) % maxSeats
+            : i;
+          const badgeAbove = seatOffset === 0 || seatOffset === 1 || seatOffset === maxSeats - 1;
           return (
             <div 
               key={i} 
@@ -82,6 +85,7 @@ export function PokerTable({ gameState, playerId, onAction, onRebuy }: PokerTabl
                 isDealer={gameState.dealerIndex === i}
                 isSmallBlind={i === sbSeat}
                 isBigBlind={i === bbSeat}
+                badgeAbove={badgeAbove}
                 onRebuy={player?.id === playerId && onRebuy ? () => onRebuy() : undefined}
               />
             </div>

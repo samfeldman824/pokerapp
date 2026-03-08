@@ -10,6 +10,7 @@ interface PlayerSeatProps {
   isDealer: boolean;
   isSmallBlind?: boolean;
   isBigBlind?: boolean;
+  badgeAbove?: boolean;
   onRebuy?: () => void;
 }
 
@@ -21,6 +22,7 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
   isDealer, 
   isSmallBlind,
   isBigBlind,
+  badgeAbove = false,
   onRebuy,
 }) => {
   if (!player) {
@@ -35,11 +37,18 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
   const getInitials = (name: string) => name.substring(0, 2).toUpperCase();
   const displayName = player.displayName.substring(0, 12) + (player.displayName.length > 12 ? '...' : '');
 
-  const seatClasses = `
-    relative flex flex-col items-center
-    ${player.isFolded ? 'opacity-50 grayscale hover:grayscale-0 transition-all' : 'opacity-100'}
-    ${!player.isConnected ? 'opacity-40 brightness-75 grayscale' : ''}
-  `;
+  const seatClasses = [
+    'relative flex flex-col items-center',
+    !player.isConnected
+      ? 'opacity-40 brightness-75 grayscale'
+      : player.isFolded
+        ? 'opacity-50 grayscale hover:grayscale-0 transition-all'
+        : '',
+  ].join(' ');
+
+  const badgePositionClass = badgeAbove
+    ? 'bottom-[88px]'
+    : 'top-[88px]';
 
   return (
     <div className={seatClasses}>
@@ -93,7 +102,7 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
         )}
       </div>
 
-      <div className="bg-slate-900/90 border border-slate-700/50 rounded-xl px-4 py-1.5 mt-2 flex flex-col items-center shadow-md backdrop-blur-sm z-10 min-w-[100px]">
+      <div className={`absolute ${badgePositionClass} left-1/2 -translate-x-1/2 bg-slate-900/90 border border-slate-700/50 rounded-xl px-4 py-1.5 flex flex-col items-center shadow-md backdrop-blur-sm z-30 min-w-[100px] whitespace-nowrap`}>
         <span className={`text-sm font-semibold truncate max-w-full ${isCurrentPlayer ? 'text-amber-400' : 'text-slate-200'}`}>
           {displayName}
         </span>
@@ -107,7 +116,7 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
       </div>
 
       {player.bet > 0 && (
-        <div className="absolute top-[135px] flex items-center gap-1.5 bg-slate-950/80 border border-emerald-500/30 rounded-full px-3 py-1 shadow-sm backdrop-blur-md whitespace-nowrap z-30 transform hover:scale-110 transition-transform">
+        <div className={`absolute ${badgeAbove ? 'bottom-[135px]' : 'top-[135px]'} flex items-center gap-1.5 bg-slate-950/80 border border-emerald-500/30 rounded-full px-3 py-1 shadow-sm backdrop-blur-md whitespace-nowrap z-30 transform hover:scale-110 transition-transform`}>
           <span className="text-emerald-500 text-sm">🪙</span>
           <span className="text-emerald-100 font-mono text-xs font-bold">{player.bet}</span>
         </div>
