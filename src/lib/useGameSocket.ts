@@ -18,9 +18,16 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
-import type { ClientGameState } from '@/engine/types'
+import type { ClientGameState, HandResult } from '@/engine/types'
 
 import { socket } from './socket'
+
+export type HandResultEvent = {
+  gameId: string
+  handNumber: number
+  communityCards: ClientGameState['communityCards']
+  results: HandResult[]
+}
 
 /**
  * @param gameId - The game UUID from the URL. All events and storage keys are scoped to this ID.
@@ -38,6 +45,7 @@ export function useGameSocket(gameId: string): {
   playerId: string | null
   isConnected: boolean
   lastError: string | null
+  lastHandResult: HandResultEvent | null
   emit: (event: string, data: unknown) => void
   registerPlayer: (playerId: string) => void
 } {
@@ -45,6 +53,7 @@ export function useGameSocket(gameId: string): {
   const [playerId, setPlayerId] = useState<string | null>(null)
   const [isConnected, setIsConnected] = useState<boolean>(socket.connected)
   const [lastError, setLastError] = useState<string | null>(null)
+  const [lastHandResult, setLastHandResult] = useState<HandResultEvent | null>(null)
 
   const emit = useCallback((event: string, data: unknown) => {
     socket.emit(event, data)
@@ -115,11 +124,17 @@ export function useGameSocket(gameId: string): {
       setLastError(data.message)
     }
 
+    const onHandResult = (event: HandResultEvent) => {
+      if (event.gameId !== gameId) return
+      setLastHandResult(event)
+    }
+
     socket.on('connect', onConnect)
     socket.on('disconnect', onDisconnect)
     socket.on('joined', onJoined)
     socket.on('game-state', onGameState)
     socket.on('error', onError)
+    socket.on('hand-result', onHandResult)
 
     socket.connect()
 
@@ -129,6 +144,7 @@ export function useGameSocket(gameId: string): {
       socket.off('joined', onJoined)
       socket.off('game-state', onGameState)
       socket.off('error', onError)
+      socket.off('hand-result', onHandResult)
       socket.disconnect()
     }
   }, [gameId])
@@ -138,6 +154,7 @@ export function useGameSocket(gameId: string): {
     playerId,
     isConnected,
     lastError,
+    lastHandResult,
     emit,
     registerPlayer,
   }

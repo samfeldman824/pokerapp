@@ -329,8 +329,8 @@ function buildHandResults(previousGame: GameState, resolvedGame: GameState): Han
 
   return resolvedPlayers.map((player) => {
     const previousPlayer = previousPlayersById.get(player.id)
-    // Winnings = chip gain relative to state before the hand ended
     const winnings = previousPlayer ? Math.max(0, player.chips - previousPlayer.chips) : 0
+    const chipDelta = previousPlayer ? player.chips - previousPlayer.chips : 0
     const evaluation = player.isFolded || player.holeCards === null
       ? null
       : evaluatedHands.get(player.id)?.evaluation ?? null
@@ -340,6 +340,7 @@ function buildHandResults(previousGame: GameState, resolvedGame: GameState): Han
       holeCards: player.holeCards,
       evaluation,
       winnings,
+      chipDelta,
       potAwards: potAwards.filter((potAward) => potAward.winnerIds.includes(player.id)).map((potAward) => ({
         potIndex: potAward.potIndex,
         amount: potAward.amount,

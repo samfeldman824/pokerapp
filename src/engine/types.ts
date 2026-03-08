@@ -196,5 +196,6 @@ export interface HandResult {
   holeCards: [Card, Card] | null   // null if the player folded before showdown
   evaluation: HandEvaluation | null  // null if player folded
   winnings: number
+  chipDelta: number                  // net chip change this hand (negative = lost chips)
   potAwards: PotAward[]
 }
