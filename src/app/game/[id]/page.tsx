@@ -84,7 +84,7 @@ export default function GamePage() {
     | null
   >(null);
 
-  const { gameState, playerId, isConnected, emit } = useGameSocket(gameId);
+  const { gameState, playerId, isConnected, lastHandResult, emit } = useGameSocket(gameId);
 
   // Tracks the previous connection state so we can detect transitions (connected→lost, lost→reconnected)
   const prevConnectedRef = useRef<boolean | null>(null);
@@ -395,6 +395,13 @@ export default function GamePage() {
             Players: <span className="text-white font-medium">{gameState?.players.filter(Boolean).length || gameInfo?.playerCount || 0}/{gameInfo?.maxPlayers || 0}</span>
           </div>
 
+          <button
+            onClick={() => setShowLedger(true)}
+            className="px-4 py-1.5 bg-gray-800 hover:bg-gray-700 text-white text-sm font-medium rounded border border-gray-700 transition-colors"
+          >
+            Session Ledger
+          </button>
+
           <div
             className={
               `flex items-center gap-2 rounded-full border px-3 py-1 ` +
@@ -440,12 +447,6 @@ export default function GamePage() {
           </div>
           <div className="flex items-center space-x-3">
             <button
-              onClick={() => setShowLedger(true)}
-              className="px-4 py-1.5 bg-gray-800 hover:bg-gray-700 text-white text-sm font-medium rounded border border-gray-700 transition-colors"
-            >
-              Session Ledger
-            </button>
-            <button
               onClick={handleStartGame}
               disabled={gameState?.phase !== "waiting"}
               className="px-4 py-1.5 bg-green-600 hover:bg-green-500 disabled:bg-gray-800 disabled:text-gray-600 text-white text-sm font-medium rounded transition-colors"
@@ -478,7 +479,7 @@ export default function GamePage() {
       </main>
 
       {showJoinModal && renderJoinModal()}
-      {showLedger && <SessionLedger gameId={gameId} onClose={() => setShowLedger(false)} />}
+      {showLedger && <SessionLedger gameId={gameId} onClose={() => setShowLedger(false)} gameState={gameState} lastHandResult={lastHandResult} />}
     </div>
   );
 }

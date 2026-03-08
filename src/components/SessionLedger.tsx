@@ -1,47 +1,51 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { ClientGameState } from '@/engine/types'
+import type { HandResultEvent } from '@/lib/useGameSocket'
 
-type LedgerEntry = {
+type DbLedgerEntry = {
   playerId: string
   displayName: string
   chipsBroughtIn: number
   chipsCarriedOut: number | null
-  netResult: number | null
 }
 
 type SessionLedgerProps = {
   gameId: string
   onClose: () => void
+  gameState: ClientGameState | null
+  lastHandResult: HandResultEvent | null
 }
 
 function formatChips(value: number | null): string {
-  if (value === null) {
-    return '--'
-  }
-
+  if (value === null) return '--'
   return value.toLocaleString()
 }
 
+function formatDelta(value: number): string {
+  if (value === 0) return '—'
+  return `${value > 0 ? '+' : ''}${value.toLocaleString()}`
+}
+
 function netResultClass(value: number | null): string {
-  if (value === null) {
-    return 'text-gray-400'
-  }
-
-  if (value > 0) {
-    return 'text-emerald-400'
-  }
-
-  if (value < 0) {
-    return 'text-rose-400'
-  }
-
+  if (value === null) return 'text-gray-400'
+  if (value > 0) return 'text-emerald-400'
+  if (value < 0) return 'text-rose-400'
   return 'text-gray-200'
 }
 
-export function SessionLedger({ gameId, onClose }: SessionLedgerProps) {
-  const [entries, setEntries] = useState<LedgerEntry[]>([])
+function deltaClass(value: number): string {
+  if (value > 0) return 'text-emerald-400'
+  if (value < 0) return 'text-rose-400'
+  return 'text-gray-500'
+}
+
+export function SessionLedger({ gameId, onClose, gameState, lastHandResult }: SessionLedgerProps) {
+  const [dbEntries, setDbEntries] = useState<DbLedgerEntry[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Fetch once per game to get chipsBroughtIn baselines.
+  // Current chip counts come from gameState directly, not the API.
   useEffect(() => {
     let isMounted = true
 
@@ -51,33 +55,49 @@ export function SessionLedger({ gameId, onClose }: SessionLedgerProps) {
         setError(null)
 
         const response = await fetch(`/api/games/${gameId}/ledger`)
+        if (!response.ok) throw new Error('Failed to load ledger')
 
-        if (!response.ok) {
-          throw new Error('Failed to load ledger')
-        }
-
-        const data: LedgerEntry[] = await response.json()
-
-        if (isMounted) {
-          setEntries(data)
-        }
+        const data: DbLedgerEntry[] = await response.json()
+        if (isMounted) setDbEntries(data)
       } catch (fetchError) {
         if (isMounted) {
           setError(fetchError instanceof Error ? fetchError.message : 'Failed to load ledger')
         }
       } finally {
-        if (isMounted) {
-          setIsLoading(false)
-        }
+        if (isMounted) setIsLoading(false)
       }
     }
 
     void fetchLedger()
-
-    return () => {
-      isMounted = false
-    }
+    return () => { isMounted = false }
   }, [gameId])
+
+  // Build a live chip count lookup from gameState — authoritative for seated players.
+  const liveChipsByPlayerId = useMemo(
+    () =>
+      new Map(
+        (gameState?.players ?? [])
+          .filter((p): p is NonNullable<typeof p> => p !== null)
+          .map((p) => [p.id, p.chips]),
+      ),
+    [gameState?.players],
+  )
+
+  // Merge DB baseline (chipsBroughtIn) with live chip counts from gameState.
+  // For players who have left, fall back to the DB chipsCarriedOut.
+  const displayEntries = useMemo(
+    () =>
+      dbEntries.map((entry) => {
+        const chipsNow = liveChipsByPlayerId.get(entry.playerId) ?? entry.chipsCarriedOut
+        const netResult = chipsNow !== null ? chipsNow - entry.chipsBroughtIn : null
+        return { ...entry, chipsNow, netResult }
+      }),
+    [dbEntries, liveChipsByPlayerId],
+  )
+
+  const deltaByPlayerId = lastHandResult
+    ? new Map(lastHandResult.results.map((r) => [r.playerId, r.chipDelta]))
+    : null
 
   return (
     <div className="fixed inset-0 z-[65] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
@@ -110,25 +130,36 @@ export function SessionLedger({ gameId, onClose }: SessionLedgerProps) {
               <table className="min-w-full divide-y divide-white/10">
                 <thead className="bg-white/[0.04] text-left text-xs uppercase tracking-[0.25em] text-gray-500">
                   <tr>
-                    <th className="px-4 py-3 font-medium">Player Name</th>
-                    <th className="px-4 py-3 font-medium">Chips Brought In</th>
+                    <th className="px-4 py-3 font-medium">Player</th>
+                    <th className="px-4 py-3 font-medium">Brought In</th>
                     <th className="px-4 py-3 font-medium">Chips Now</th>
-                    <th className="px-4 py-3 font-medium">Net Result</th>
+                    {deltaByPlayerId && (
+                      <th className="px-4 py-3 font-medium">Last Hand</th>
+                    )}
+                    <th className="px-4 py-3 font-medium">Net</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/10 bg-black/20 text-sm text-gray-200">
-                  {entries.map((entry) => (
-                    <tr key={entry.playerId} className="transition-colors hover:bg-white/[0.03]">
-                      <td className="px-4 py-3 font-medium text-white">{entry.displayName}</td>
-                      <td className="px-4 py-3">{formatChips(entry.chipsBroughtIn)}</td>
-                      <td className="px-4 py-3">{formatChips(entry.chipsCarriedOut)}</td>
-                      <td className={`px-4 py-3 font-semibold ${netResultClass(entry.netResult)}`}>
-                        {entry.netResult === null
-                          ? '--'
-                          : `${entry.netResult > 0 ? '+' : ''}${entry.netResult.toLocaleString()}`}
-                      </td>
-                    </tr>
-                  ))}
+                  {displayEntries.map((entry) => {
+                    const delta = deltaByPlayerId?.get(entry.playerId)
+                    return (
+                      <tr key={entry.playerId} className="transition-colors hover:bg-white/[0.03]">
+                        <td className="px-4 py-3 font-medium text-white">{entry.displayName}</td>
+                        <td className="px-4 py-3">{formatChips(entry.chipsBroughtIn)}</td>
+                        <td className="px-4 py-3">{formatChips(entry.chipsNow)}</td>
+                        {deltaByPlayerId && (
+                          <td className={`px-4 py-3 font-semibold tabular-nums ${delta !== undefined ? deltaClass(delta) : 'text-gray-500'}`}>
+                            {delta !== undefined ? formatDelta(delta) : '—'}
+                          </td>
+                        )}
+                        <td className={`px-4 py-3 font-semibold ${netResultClass(entry.netResult)}`}>
+                          {entry.netResult === null
+                            ? '--'
+                            : `${entry.netResult > 0 ? '+' : ''}${entry.netResult.toLocaleString()}`}
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
