@@ -25,7 +25,7 @@ import { useParams } from "next/navigation";
 import PokerTable from "@/components/PokerTable";
 import { SessionLedger } from "@/components/SessionLedger";
 import { useGameSocket } from "@/lib/useGameSocket";
-import { PlayerAction, GamePhase } from "@/engine/types";
+import { PlayerAction, GamePhase, ActionType } from "@/engine/types";
 import Link from "next/link";
 import { ShowMuckActionBar } from "@/components/ShowMuckActionBar";
 
@@ -37,6 +37,7 @@ interface GameInfo {
     smallBlind: number;
     bigBlind: number;
     startingStack: number;
+    betweenHandsDelay: number;
   };
   phase: string;
   playerCount: number;
@@ -51,6 +52,13 @@ type PendingSeatJoin = {
   displayName: string;
   seatIndex: number;
 };
+
+type ActionConfirmation = {
+  message: string;
+  pending: boolean;
+};
+
+const ACTION_CONFIRMATION_DURATION_MS = 1500;
 
 export default function GamePage() {
   const params = useParams();
@@ -85,14 +93,16 @@ export default function GamePage() {
     | null
   >(null);
 
-  const { gameState, playerId, isConnected, lastHandResult, emit } = useGameSocket(gameId);
+  const { gameState, playerId, isConnected, lastError, lastHandResult, emit } = useGameSocket(gameId);
 
   const [muckedHandNumber, setMuckedHandNumber] = useState<number | null>(null);
+  const [actionConfirmation, setActionConfirmation] = useState<ActionConfirmation | null>(null);
 
   // Tracks the previous connection state so we can detect transitions (connected→lost, lost→reconnected)
   const prevConnectedRef = useRef<boolean | null>(null);
   // Holds the auto-dismiss timer for the "Reconnected!" banner
   const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const actionConfirmationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Cleanup the auto-dismiss timer on unmount to avoid setState on unmounted component
   useEffect(() => {
@@ -101,8 +111,40 @@ export default function GamePage() {
         clearTimeout(bannerTimeoutRef.current);
         bannerTimeoutRef.current = null;
       }
+      if (actionConfirmationTimeoutRef.current) {
+        clearTimeout(actionConfirmationTimeoutRef.current);
+        actionConfirmationTimeoutRef.current = null;
+      }
     };
   }, []);
+
+  const formatActionConfirmation = useCallback((action: PlayerAction): string => {
+    if (!gameState || !playerId) {
+      return "Action sent";
+    }
+
+    const player = gameState.players.find((candidate) => candidate?.id === playerId);
+    const currentBet = gameState.currentBet ?? 0;
+    const playerBet = player?.bet ?? 0;
+    const playerChips = player?.chips ?? 0;
+    const callAmount = Math.min(Math.max(0, currentBet - playerBet), playerChips);
+    const isBet = [GamePhase.Flop, GamePhase.Turn, GamePhase.River].includes(gameState.phase) && currentBet === 0;
+
+    switch (action.type) {
+      case ActionType.Fold:
+        return "You folded";
+      case ActionType.Check:
+        return "You checked";
+      case ActionType.Call:
+        return `You called $${callAmount}`;
+      case ActionType.Bet:
+        return `You bet $${action.amount}`;
+      case ActionType.Raise:
+        return `${isBet ? "You bet" : "You raised to"} $${action.amount}`;
+      default:
+        return "Action sent";
+    }
+  }, [gameState, playerId]);
 
   // Show/hide the connection banner on state transitions.
   // We skip the very first render (prevConnectedRef === null) to avoid a spurious banner on load.
@@ -214,8 +256,64 @@ export default function GamePage() {
   const handleAction = useCallback((action: PlayerAction) => {
     if (!playerId) return;
 
+    if (actionConfirmationTimeoutRef.current) {
+      clearTimeout(actionConfirmationTimeoutRef.current);
+      actionConfirmationTimeoutRef.current = null;
+    }
+
+    setActionConfirmation({
+      message: formatActionConfirmation(action),
+      pending: true,
+    });
     emit("player-action", { gameId, playerId, action });
-  }, [emit, gameId, playerId]);
+  }, [emit, formatActionConfirmation, gameId, playerId]);
+
+  useEffect(() => {
+    if (!actionConfirmation?.pending || !gameState || !playerId) {
+      return;
+    }
+
+    const player = gameState.players.find((candidate) => candidate?.id === playerId);
+    const isPlayersTurn = !!player && gameState.activePlayerIndex === player.seatIndex;
+
+    if (isPlayersTurn) {
+      return;
+    }
+
+    setActionConfirmation((current) => current ? { ...current, pending: false } : current);
+  }, [actionConfirmation, gameState, playerId]);
+
+  useEffect(() => {
+    if (!actionConfirmation || actionConfirmation.pending) {
+      return;
+    }
+
+    actionConfirmationTimeoutRef.current = setTimeout(() => {
+      setActionConfirmation(null);
+      actionConfirmationTimeoutRef.current = null;
+    }, ACTION_CONFIRMATION_DURATION_MS);
+
+    return () => {
+      if (actionConfirmationTimeoutRef.current) {
+        clearTimeout(actionConfirmationTimeoutRef.current);
+        actionConfirmationTimeoutRef.current = null;
+      }
+    };
+  }, [actionConfirmation]);
+
+  useEffect(() => {
+    if (!actionConfirmation?.pending) {
+      return;
+    }
+
+    if (!isConnected || lastError) {
+      if (actionConfirmationTimeoutRef.current) {
+        clearTimeout(actionConfirmationTimeoutRef.current);
+        actionConfirmationTimeoutRef.current = null;
+      }
+      setActionConfirmation(null);
+    }
+  }, [actionConfirmation, isConnected, lastError]);
 
   const handleShowCards = useCallback(() => {
     if (!playerId || !gameState) return;
@@ -380,6 +478,7 @@ export default function GamePage() {
 
   // True only if the current player is the game host — gates host-only controls
   const isHost = gameState && playerId === gameState.hostPlayerId;
+  const betweenHandsDelay = gameState?.config.betweenHandsDelay ?? gameInfo?.config.betweenHandsDelay;
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col font-sans text-gray-200 relative overflow-hidden">
@@ -449,6 +548,11 @@ export default function GamePage() {
         <div className="bg-gray-900/80 backdrop-blur border-b border-gray-800 px-6 py-3 flex items-center justify-between z-10">
           <div className="flex items-center space-x-2">
             <span className="text-xs text-indigo-400 uppercase tracking-widest font-bold bg-indigo-900/30 px-2 py-1 rounded">Host Controls</span>
+            {betweenHandsDelay !== undefined && (
+              <span className="text-xs text-gray-400 uppercase tracking-widest">
+                Delay Between Hands: <span className="text-white font-medium normal-case">{betweenHandsDelay}s</span>
+              </span>
+            )}
           </div>
           <div className="flex items-center space-x-3">
             <button
@@ -474,7 +578,7 @@ export default function GamePage() {
         
         {gameState && playerId ? (
           <div className="w-full h-full p-4 relative z-10">
-            <PokerTable gameState={gameState} playerId={playerId} onAction={handleAction} />
+            <PokerTable gameState={gameState} playerId={playerId} onAction={handleAction} actionConfirmation={actionConfirmation} />
             {(() => {
               const activePlayers = gameState.players.filter(p => p && !p.isFolded);
               const isUncontestedWin = gameState.phase === GamePhase.Showdown && activePlayers.length === 1;

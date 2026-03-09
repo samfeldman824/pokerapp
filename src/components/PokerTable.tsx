@@ -9,9 +9,13 @@ interface PokerTableProps {
   gameState: ClientGameState;
   playerId: string;
   onAction: (action: PlayerAction) => void;
+  actionConfirmation: {
+    message: string;
+    pending: boolean;
+  } | null;
 }
 
-export function PokerTable({ gameState, playerId, onAction }: PokerTableProps) {
+export function PokerTable({ gameState, playerId, onAction, actionConfirmation }: PokerTableProps) {
   const currentPlayerSeatIndex = gameState.players.findIndex(p => p?.id === playerId);
   const isPlaying = currentPlayerSeatIndex >= 0;
   
@@ -38,6 +42,7 @@ export function PokerTable({ gameState, playerId, onAction }: PokerTableProps) {
   };
 
   const isTurn = gameState.activePlayerIndex === currentPlayerSeatIndex;
+  const showActionBar = isTurn || Boolean(actionConfirmation);
 
   const seatedPlayers = gameState.players.filter(Boolean);
   const maxSeats = gameState.config.maxPlayers;
@@ -80,6 +85,7 @@ export function PokerTable({ gameState, playerId, onAction }: PokerTableProps) {
               <PlayerSeat
                 player={player}
                 seatIndex={i}
+                communityCards={gameState.communityCards}
                 isCurrentPlayer={player?.id === playerId}
                 isActive={gameState.activePlayerIndex === i}
                 isDealer={gameState.dealerIndex === i}
@@ -92,13 +98,19 @@ export function PokerTable({ gameState, playerId, onAction }: PokerTableProps) {
         })}
       </div>
 
-      {isTurn && (
+      {showActionBar && (
         <div className="absolute bottom-8 w-full max-w-3xl z-50">
-          <ActionBar gameState={gameState} playerId={playerId} onAction={onAction} />
+          <ActionBar
+            gameState={gameState}
+            playerId={playerId}
+            onAction={onAction}
+            isActing={actionConfirmation?.pending ?? false}
+            confirmationMessage={actionConfirmation?.message ?? null}
+          />
         </div>
       )}
 
-      {!isTurn && isPlaying && (
+      {!isTurn && isPlaying && !actionConfirmation && (
         <PreActionBar gameState={gameState} playerId={playerId} onAction={onAction} />
       )}
     </div>

@@ -56,6 +56,7 @@ export function useGameSocket(gameId: string): {
   const [lastHandResult, setLastHandResult] = useState<HandResultEvent | null>(null)
 
   const emit = useCallback((event: string, data: unknown) => {
+    setLastError(null)
     socket.emit(event, data)
   }, [])
 
@@ -99,6 +100,7 @@ export function useGameSocket(gameId: string): {
      *   reconnects do not — the existing token remains valid).
      */
     const onJoined = (data: { playerId: string; token?: string }) => {
+      setLastError(null)
       localStorage.setItem(playerKey, data.playerId)
       setPlayerId(data.playerId)
       if (data.token) {
@@ -109,6 +111,7 @@ export function useGameSocket(gameId: string): {
     const onGameState = (state: ClientGameState) => {
       // Guard against stale events from a previous game room (shouldn't happen, but defensive)
       if (state.id !== gameId) return
+      setLastError(null)
       setGameState(state)
 
       // Fallback: if playerId was cleared but localStorage still has it, restore it.

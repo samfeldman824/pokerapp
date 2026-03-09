@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from 'react';
-import { ClientPlayerState, ActionType } from '@/engine/types';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ClientPlayerState, ActionType, Card } from '@/engine/types';
+import { evaluateHand } from '@/engine/handEvaluator';
 import { HoleCards } from './HoleCards';
 
 interface PlayerSeatProps {
   player: ClientPlayerState | null;
   seatIndex: number;
+  communityCards: Card[];
   isCurrentPlayer: boolean;
   isActive: boolean;
   isDealer: boolean;
@@ -16,6 +18,7 @@ interface PlayerSeatProps {
 export const PlayerSeat: React.FC<PlayerSeatProps> = ({ 
   player, 
   seatIndex, 
+  communityCards,
   isCurrentPlayer, 
   isActive, 
   isDealer, 
@@ -24,6 +27,13 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
   badgeAbove = false,
 }) => {
   const [showAction, setShowAction] = useState(false);
+  const handStrength = useMemo(() => {
+    if (!player || !isCurrentPlayer || player.isFolded || !player.holeCards || communityCards.length < 3) {
+      return null;
+    }
+
+    return evaluateHand(player.holeCards as [Card, Card], communityCards).description;
+  }, [communityCards, isCurrentPlayer, player]);
 
   useEffect(() => {
     if (player?.lastAction) {
@@ -151,6 +161,12 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
       <div className="absolute top-[80px] -right-[15px] z-20 scale-75 origin-top-left">
         <HoleCards cards={player.holeCards} isCurrentPlayer={isCurrentPlayer} isFolded={player.isFolded} />
       </div>
+
+      {handStrength && (
+        <div className="absolute top-[126px] left-1/2 -translate-x-1/2 rounded-full border border-indigo-500/30 bg-indigo-950/70 px-3 py-1 text-[10px] font-semibold tracking-wide text-indigo-100 shadow-sm backdrop-blur-md z-20 whitespace-nowrap">
+          {handStrength}
+        </div>
+      )}
 
       {player.bet > 0 && (
         <div className={`absolute ${badgeAbove ? 'bottom-[135px]' : 'top-[135px]'} flex items-center gap-1.5 bg-slate-950/80 border border-emerald-500/30 rounded-full px-3 py-1 shadow-sm backdrop-blur-md whitespace-nowrap z-30 transform hover:scale-110 transition-transform`}>
