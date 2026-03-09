@@ -69,6 +69,7 @@ export function addPlayer(
     disconnectTime: null,
     seatIndex,
     token,
+    lastAction: null,
   }
 
   return {

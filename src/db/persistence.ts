@@ -81,6 +81,7 @@ export async function loadPersistedGame(gameId: string): Promise<GameState | nul
     const snapshot = gameRow.gameState as Omit<GameState, 'deck'>
     return {
       ...snapshot,
+      shownCards: snapshot.shownCards ?? {},
       deck: [],
     }
   }
@@ -112,6 +113,7 @@ export async function loadPersistedGame(gameId: string): Promise<GameState | nul
     disconnectTime: null,
     seatIndex: player.seatIndex,
     token: player.token,
+    lastAction: null,
   }))
 
   return {
@@ -127,6 +129,7 @@ export async function loadPersistedGame(gameId: string): Promise<GameState | nul
     currentBet: 0,
     minRaise: config.bigBlind,
     deck: [],
+    shownCards: {},
     handNumber: 0,
     lastRaiseAmount: config.bigBlind,
     playersToAct: [],

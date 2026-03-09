@@ -19,6 +19,7 @@ function player(id: string, bet: number, options: { isAllIn?: boolean; isFolded?
     disconnectTime: null,
     seatIndex: 0,
     token: 'token',
+    lastAction: null,
   }
 }
 

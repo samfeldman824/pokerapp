@@ -106,6 +106,7 @@ export interface PlayerState {
   disconnectTime: number | null    // timestamp (ms) when the player disconnected; null if connected
   seatIndex: number                // 0-indexed seat position at the table (0–8)
   token: string                    // opaque reconnection secret — SERVER-SIDE ONLY, never sent to clients
+  lastAction: { type: ActionType; amount?: number; timestamp: number } | null  // last action taken by this player (cleared at hand start)
 }
 
 export interface GameConfig {
@@ -129,6 +130,7 @@ export interface GameState {
   currentBet?: number              // highest bet on the table this street
   minRaise?: number                // minimum raise SIZE (not total bet) for the current street
   deck: Card[]                     // remaining undealt cards — SERVER-SIDE ONLY, stripped before client broadcast
+  shownCards: Record<string, boolean>
   handNumber: number               // increments each hand; used for hand history
   lastRaiseAmount: number          // tracks the most recent raise increment for minimum re-raise calculation
   /**

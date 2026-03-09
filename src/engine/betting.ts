@@ -446,13 +446,16 @@ export function applyAction(game: GameState, action: PlayerAction): GameState {
       updatedPlayer = {
         ...actingPlayer,
         isFolded: true,
+        lastAction: { type: action.type, timestamp: Date.now() },
       }
       break
     case ActionType.Check:
-      // No chip movement; player simply passes
+      updatedPlayer = {
+        ...actingPlayer,
+        lastAction: { type: action.type, timestamp: Date.now() },
+      }
       break
     case ActionType.Call: {
-      // Call is capped at the player's remaining chips (all-in call)
       const contribution = Math.min(actingPlayer.chips, Math.max(0, previousCurrentBet - actingPlayer.bet))
       updatedPlayer = {
         ...actingPlayer,
@@ -460,6 +463,7 @@ export function applyAction(game: GameState, action: PlayerAction): GameState {
         bet: actingPlayer.bet + contribution,
         totalBetThisHand: actingPlayer.totalBetThisHand + contribution,
         isAllIn: actingPlayer.chips === contribution,
+        lastAction: { type: action.type, amount: actingPlayer.bet + contribution, timestamp: Date.now() },
       }
       break
     }
@@ -472,13 +476,13 @@ export function applyAction(game: GameState, action: PlayerAction): GameState {
         bet: action.amount,
         totalBetThisHand: actingPlayer.totalBetThisHand + contribution,
         isAllIn: actingPlayer.chips === contribution,
+        lastAction: { type: action.type, amount: action.amount, timestamp: Date.now() },
       }
 
       const raiseSize = updatedPlayer.bet - previousCurrentBet
       currentBet = updatedPlayer.bet
 
       if (raiseSize >= previousMinRaise) {
-        // Full bet/raise: update the minimum re-raise size and reopen action to all other players
         minRaise = raiseSize
         lastRaiseAmount = raiseSize
         playersToAct = getOrderedResponders(
@@ -489,7 +493,6 @@ export function applyAction(game: GameState, action: PlayerAction): GameState {
           actingSeat
         )
       }
-      // Sub-minimum all-in bet/raise: action is NOT reopened (playersToAct unchanged)
 
       break
     }

@@ -245,6 +245,7 @@ export function createGame(config: GameConfig): GameState {
     currentBet: 0,
     minRaise: config.bigBlind ?? DEFAULT_CONFIG.bigBlind,
     deck: [],
+    shownCards: {},
     handNumber: 0,
     lastRaiseAmount: config.bigBlind ?? DEFAULT_CONFIG.bigBlind,
     playersToAct: [],
@@ -298,6 +299,7 @@ export function startHand(game: GameState): GameState {
     totalBetThisHand: 0,
     isFolded: false,
     isAllIn: false,
+    lastAction: null,
   }))
 
   // Deal 2 hole cards to each player who has chips; skip busted players
@@ -328,6 +330,7 @@ export function startHand(game: GameState): GameState {
     currentBet: 0,
     minRaise: game.config.bigBlind,
     deck,
+    shownCards: {},
     lastRaiseAmount: game.config.bigBlind,
     playersToAct: [],
     timerStart: null,
@@ -508,7 +511,7 @@ export function getPlayerView(game: GameState, playerId: string): ClientGameStat
     const { token: _token, holeCards, ...playerWithoutToken } = player
     seatIndexedPlayers[player.seatIndex] = {
       ...playerWithoutToken,
-      holeCards: game.phase === GamePhase.Showdown || player.id === playerId
+      holeCards: game.phase === GamePhase.Showdown || player.id === playerId || game.shownCards[player.id]
         ? holeCards
         : null,
     }

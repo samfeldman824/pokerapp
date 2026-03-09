@@ -255,6 +255,11 @@ function getPlayersInResolvedHand(game: GameState): PlayerState[] {
   )
 }
 
+function getUncontestedWinner(game: GameState): PlayerState | null {
+  const remainingPlayers = getPlayersInResolvedHand(game).filter((player) => !player.isFolded)
+  return remainingPlayers.length === 1 ? remainingPlayers[0] : null
+}
+
 // ---------------------------------------------------------------------------
 // Hand history helpers
 // ---------------------------------------------------------------------------
@@ -684,6 +689,45 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
           await emitHandResult(io, handResultEvent)
         }
 
+        await broadcastGameState(io, nextGame)
+      } catch (error) {
+        emitSocketError(socket, error)
+      }
+    })
+  })
+
+  socket.on('show-cards', (payload: GamePlayerPayload) => {
+    void gameStore.withLock(payload.gameId, async () => {
+      try {
+        const game = await getOrLoadGame(payload.gameId)
+
+        if (!game) {
+          throw new Error('Game not found')
+        }
+
+        if (game.phase !== GamePhase.Showdown || !isHandComplete(game)) {
+          throw new Error('Cards can only be shown after a hand has ended')
+        }
+
+        const winner = getUncontestedWinner(game)
+
+        if (!winner) {
+          throw new Error('Cards can only be shown after an uncontested win')
+        }
+
+        if (winner.id !== payload.playerId) {
+          throw new Error('Only the hand winner can show cards')
+        }
+
+        const nextGame: GameState = {
+          ...game,
+          shownCards: {
+            ...game.shownCards,
+            [payload.playerId]: true,
+          },
+        }
+
+        gameStore.set(nextGame.id, nextGame)
         await broadcastGameState(io, nextGame)
       } catch (error) {
         emitSocketError(socket, error)
