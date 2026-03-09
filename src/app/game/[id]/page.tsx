@@ -25,8 +25,9 @@ import { useParams } from "next/navigation";
 import PokerTable from "@/components/PokerTable";
 import { SessionLedger } from "@/components/SessionLedger";
 import { useGameSocket } from "@/lib/useGameSocket";
-import { PlayerAction } from "@/engine/types";
+import { PlayerAction, GamePhase } from "@/engine/types";
 import Link from "next/link";
+import { ShowMuckActionBar } from "@/components/ShowMuckActionBar";
 
 /** Shape of the REST game snapshot fetched on mount. */
 interface GameInfo {
@@ -85,6 +86,8 @@ export default function GamePage() {
   >(null);
 
   const { gameState, playerId, isConnected, lastHandResult, emit } = useGameSocket(gameId);
+
+  const [muckedHandNumber, setMuckedHandNumber] = useState<number | null>(null);
 
   // Tracks the previous connection state so we can detect transitions (connected→lost, lost→reconnected)
   const prevConnectedRef = useRef<boolean | null>(null);
@@ -213,6 +216,16 @@ export default function GamePage() {
 
     emit("player-action", { gameId, playerId, action });
   }, [emit, gameId, playerId]);
+
+  const handleShowCards = useCallback(() => {
+    if (!playerId || !gameState) return;
+    emit("show-cards", { gameId, playerId });
+  }, [emit, gameId, playerId, gameState]);
+
+  const handleMuckCards = useCallback(() => {
+    if (!gameState) return;
+    setMuckedHandNumber(gameState.handNumber);
+  }, [gameState]);
 
   /**
    * Submits the join modal form. Queues a seat join; the socket useEffect will send it
@@ -462,6 +475,22 @@ export default function GamePage() {
         {gameState && playerId ? (
           <div className="w-full h-full p-4 relative z-10">
             <PokerTable gameState={gameState} playerId={playerId} onAction={handleAction} />
+            {(() => {
+              const activePlayers = gameState.players.filter(p => p && !p.isFolded);
+              const isUncontestedWin = gameState.phase === GamePhase.Showdown && activePlayers.length === 1;
+              const isWinner = isUncontestedWin && activePlayers[0]?.id === playerId;
+              const hasShown = gameState.shownCards[playerId];
+              const hasMucked = muckedHandNumber === gameState.handNumber;
+              
+              if (isWinner && !hasShown && !hasMucked) {
+                return (
+                  <div className="absolute bottom-8 w-full max-w-3xl left-1/2 -translate-x-1/2 z-50 px-4">
+                    <ShowMuckActionBar onShow={handleShowCards} onMuck={handleMuckCards} />
+                  </div>
+                );
+              }
+              return null;
+            })()}
           </div>
         ) : (
           !showJoinModal && (
