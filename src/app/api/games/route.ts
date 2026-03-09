@@ -45,6 +45,7 @@ export async function POST(req: NextRequest) {
       bigBlind, 
       startingStack, 
       timePerAction, 
+      betweenHandsDelay,
       maxPlayers, 
       hostDisplayName, 
       hostSeatIndex 
@@ -67,6 +68,9 @@ export async function POST(req: NextRequest) {
     if (typeof timePerAction !== 'number' || timePerAction < 0 || timePerAction > 120) {
       return NextResponse.json({ error: 'timePerAction must be between 0 and 120' }, { status: 400 });
     }
+    if (typeof betweenHandsDelay !== 'number' || betweenHandsDelay < 2 || betweenHandsDelay > 15) {
+      return NextResponse.json({ error: 'betweenHandsDelay must be between 2 and 15' }, { status: 400 });
+    }
     if (typeof hostDisplayName !== 'string' || !hostDisplayName.trim()) {
       return NextResponse.json({ error: 'hostDisplayName is required' }, { status: 400 });
     }
@@ -79,6 +83,7 @@ export async function POST(req: NextRequest) {
       bigBlind,
       startingStack,
       timePerAction,
+      betweenHandsDelay,
       maxPlayers,
     };
 

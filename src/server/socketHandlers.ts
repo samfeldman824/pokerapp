@@ -22,7 +22,7 @@
  * Timer architecture:
  *   - `timers`            — Per-game action countdown (auto-fold when it fires)
  *   - `disconnectTimers`  — Per-player grace period before auto-fold on disconnect
- *   - `nextHandTimers`    — Delay between hands (NEXT_HAND_DELAY_MS)
+ *   - `nextHandTimers`    — Delay between hands (per-game config)
  */
 
 import { Server, Socket } from 'socket.io'
@@ -90,7 +90,6 @@ const disconnectTimers: Map<string, NodeJS.Timeout> = new Map()
 const nextHandTimers: Map<string, NodeJS.Timeout> = new Map()
 
 const DISCONNECT_AUTO_FOLD_DELAY_MS = 30_000
-const NEXT_HAND_DELAY_MS = 2_000
 
 // ---------------------------------------------------------------------------
 // Types
@@ -167,7 +166,7 @@ function clearNextHandTimer(gameId: string): void {
 }
 
 /**
- * Schedules automatic start of the next hand after `NEXT_HAND_DELAY_MS`.
+ * Schedules automatic start of the next hand after the game's configured delay.
  *
  * Guards against stale timers by checking that the game is still in Showdown
  * and not paused at the moment the timer fires. Idempotent — clears any
@@ -175,6 +174,9 @@ function clearNextHandTimer(gameId: string): void {
  */
 function scheduleNextHand(io: Server, gameId: string): void {
   clearNextHandTimer(gameId)
+
+  const game = gameStore.get(gameId)
+  const nextHandDelayMs = (game?.config.betweenHandsDelay ?? 3) * 1000
 
   const timer = setTimeout(() => {
     void gameStore.withLock(gameId, async () => {
@@ -199,7 +201,7 @@ function scheduleNextHand(io: Server, gameId: string): void {
         // If startHand throws (e.g., only one player has chips), stay in Showdown
       }
     })
-  }, NEXT_HAND_DELAY_MS)
+  }, nextHandDelayMs)
 
   nextHandTimers.set(gameId, timer)
 }
