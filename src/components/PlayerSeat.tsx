@@ -1,5 +1,5 @@
-import React from 'react';
-import { ClientPlayerState } from '@/engine/types';
+import React, { useEffect, useState } from 'react';
+import { ClientPlayerState, ActionType } from '@/engine/types';
 import { HoleCards } from './HoleCards';
 
 interface PlayerSeatProps {
@@ -23,6 +23,18 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
   isBigBlind,
   badgeAbove = false,
 }) => {
+  const [showAction, setShowAction] = useState(false);
+
+  useEffect(() => {
+    if (player?.lastAction) {
+      setShowAction(true);
+      const timer = setTimeout(() => setShowAction(false), 3500);
+      return () => clearTimeout(timer);
+    } else {
+      setShowAction(false);
+    }
+  }, [player?.lastAction?.timestamp]);
+
   if (!player) {
     return (
       <div className="w-24 h-24 rounded-full border-2 border-dashed border-gray-600/50 flex flex-col items-center justify-center bg-gray-900/40 hover:bg-gray-800/60 transition-colors cursor-pointer text-gray-400 group relative shadow-inner backdrop-blur-sm">
@@ -47,6 +59,40 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
   const badgePositionClass = badgeAbove
     ? 'bottom-[88px]'
     : 'top-[88px]';
+
+  let actionText = '';
+  let actionColor = 'bg-gray-900/70 border-gray-500';
+  
+  if (player.lastAction) {
+    const { type, amount } = player.lastAction;
+    if (player.isAllIn && type !== ActionType.Fold && type !== ActionType.Check) {
+      actionText = `All-in $${amount}`;
+      actionColor = 'bg-red-900/80 border-red-700/50 text-red-100';
+    } else {
+      switch (type) {
+        case ActionType.Fold:
+          actionText = 'Folded';
+          actionColor = 'bg-red-900/80 border-red-700/50 text-red-100';
+          break;
+        case ActionType.Check:
+          actionText = 'Checked';
+          actionColor = 'bg-amber-900/80 border-amber-700/50 text-amber-100';
+          break;
+        case ActionType.Call:
+          actionText = `Called $${amount}`;
+          actionColor = 'bg-green-900/80 border-green-700/50 text-green-100';
+          break;
+        case ActionType.Bet:
+          actionText = `Bet $${amount}`;
+          actionColor = 'bg-green-900/80 border-green-700/50 text-green-100';
+          break;
+        case ActionType.Raise:
+          actionText = `Raised to $${amount}`;
+          actionColor = 'bg-green-900/80 border-green-700/50 text-green-100';
+          break;
+      }
+    }
+  }
 
   return (
     <div className={seatClasses}>
@@ -87,6 +133,9 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
           </div>
         )}
 
+        <div className={`absolute transition-all duration-300 ${showAction ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'} -right-4 translate-x-full top-1/2 -translate-y-1/2 ${actionColor} text-[10px] uppercase font-bold px-2 py-0.5 rounded shadow-sm border backdrop-blur z-30 whitespace-nowrap`}>
+          {actionText}
+        </div>
 
       </div>
 
