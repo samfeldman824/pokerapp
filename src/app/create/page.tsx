@@ -26,6 +26,7 @@ interface FormErrors {
   bigBlind?: string;
   startingStack?: string;
   timePerAction?: string;
+  betweenHandsDelay?: string;
   maxPlayers?: string;
   general?: string;
 }
@@ -42,6 +43,7 @@ export default function CreateGamePage() {
     bigBlind: 2,
     startingStack: 1000,
     timePerAction: 30,
+    betweenHandsDelay: 3,
     maxPlayers: 9,
   });
 
@@ -54,7 +56,7 @@ export default function CreateGamePage() {
     const { name, value, type } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: type === "number" ? Number(value) : value,
+      [name]: type === "number" || type === "range" ? Number(value) : value,
     }));
     // Clear field-specific error when user types
     if (errors[name as keyof FormErrors]) {
@@ -73,6 +75,7 @@ export default function CreateGamePage() {
    *   - bigBlind: ≥ 2 and ≥ smallBlind * 2
    *   - startingStack: ≥ 20 and ≥ bigBlind * 10
    *   - timePerAction: 0–120 (0 = unlimited)
+   *   - betweenHandsDelay: 2–15
    *   - maxPlayers: 2–9
    *
    * @returns true if all fields pass, false if any errors were set.
@@ -108,6 +111,10 @@ export default function CreateGamePage() {
 
     if (formData.timePerAction < 0 || formData.timePerAction > 120) {
       newErrors.timePerAction = "Must be between 0 and 120.";
+    }
+
+    if (formData.betweenHandsDelay < 2 || formData.betweenHandsDelay > 15) {
+      newErrors.betweenHandsDelay = "Must be between 2 and 15 seconds.";
     }
 
     if (formData.maxPlayers < 2 || formData.maxPlayers > 9) {
@@ -312,6 +319,30 @@ export default function CreateGamePage() {
                     className={`w-full bg-zinc-950/50 border ${errors.timePerAction ? 'border-red-500/50 focus:border-red-500' : 'border-zinc-800 focus:border-amber-500/50'} px-4 py-3 text-white outline-none transition-colors`}
                   />
                   {errors.timePerAction && <p className="mt-1.5 text-xs text-red-500 font-medium">{errors.timePerAction}</p>}
+                </div>
+
+                <div className="md:col-span-2">
+                  <div className="flex items-center justify-between mb-2 gap-4">
+                    <label htmlFor="betweenHandsDelay" className="block text-sm font-medium text-zinc-400">
+                      Delay Between Hands
+                    </label>
+                    <span className="text-sm font-semibold text-amber-400">{formData.betweenHandsDelay}s</span>
+                  </div>
+                  <input
+                    type="range"
+                    id="betweenHandsDelay"
+                    name="betweenHandsDelay"
+                    value={formData.betweenHandsDelay}
+                    onChange={handleChange}
+                    min={2}
+                    max={15}
+                    className="w-full accent-amber-500"
+                  />
+                  <div className="mt-2 flex justify-between text-xs uppercase tracking-widest text-zinc-600">
+                    <span>2s</span>
+                    <span>15s</span>
+                  </div>
+                  {errors.betweenHandsDelay && <p className="mt-1.5 text-xs text-red-500 font-medium">{errors.betweenHandsDelay}</p>}
                 </div>
               </div>
             </div>
