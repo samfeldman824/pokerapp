@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ClientGameState, PlayerAction, ActionType } from '../engine/types';
+import { ClientGameState, PlayerAction, ActionType, GamePhase } from '../engine/types';
 import { ActionTimer } from './ActionTimer';
 
 export interface ActionBarProps {
@@ -7,6 +7,8 @@ export interface ActionBarProps {
   playerId: string;
   onAction: (action: PlayerAction) => void;
 }
+
+const POSTFLOP_STREETS = [GamePhase.Flop, GamePhase.Turn, GamePhase.River]
 
 export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAction }) => {
   const player = gameState.players.find(p => p?.id === playerId);
@@ -33,12 +35,19 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
   const canCall = currentBet > playerBet && playerChips > 0;
   const canRaise = playerChips > callAmount;
 
+  const isBet = POSTFLOP_STREETS.includes(gameState.phase) && currentBet === 0;
+  const raiseLabel = isBet ? 'Bet' : 'Raise';
+
   const actualCallAmount = Math.min(callAmount, playerChips);
 
   const handleFold = () => onAction({ type: ActionType.Fold });
   const handleCheck = () => onAction({ type: ActionType.Check });
   const handleCall = () => onAction({ type: ActionType.Call });
-  const handleRaise = () => onAction({ type: ActionType.Raise, amount: raiseAmount });
+  const handleRaise = () => onAction(
+    isBet
+      ? { type: ActionType.Bet, amount: raiseAmount }
+      : { type: ActionType.Raise, amount: raiseAmount }
+  );
 
   const handleTimeout = () => {
     if (canCheck) {
@@ -89,22 +98,22 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
             Fold
           </button>
 
-          {canCheck ? (
-            <button
-              onClick={handleCheck}
-              className="flex-1 md:flex-none px-8 py-3 rounded-lg font-bold text-sm tracking-widest uppercase transition-all bg-amber-500/20 text-amber-500 hover:bg-amber-500/30 border border-amber-500/30"
-            >
-              Check
-            </button>
-          ) : canCall ? (
-            <button
-              onClick={handleCall}
-              className="flex-1 md:flex-none px-8 py-3 rounded-lg font-bold text-sm tracking-widest uppercase transition-all bg-amber-500/20 text-amber-500 hover:bg-amber-500/30 border border-amber-500/30 flex items-center justify-center gap-2"
-            >
-              <span>Call</span>
-              <span className="opacity-70">${actualCallAmount}</span>
-            </button>
-          ) : null}
+          <button
+            onClick={handleCheck}
+            disabled={!canCheck}
+            className="flex-1 md:flex-none px-8 py-3 rounded-lg font-bold text-sm tracking-widest uppercase transition-all bg-amber-500/20 text-amber-500 hover:bg-amber-500/30 border border-amber-500/30 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-amber-500/20"
+          >
+            Check
+          </button>
+
+          <button
+            onClick={handleCall}
+            disabled={!canCall}
+            className="flex-1 md:flex-none px-8 py-3 rounded-lg font-bold text-sm tracking-widest uppercase transition-all bg-amber-500/20 text-amber-500 hover:bg-amber-500/30 border border-amber-500/30 flex items-center justify-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-amber-500/20"
+          >
+            <span>Call</span>
+            {canCall && <span className="opacity-70">${actualCallAmount}</span>}
+          </button>
         </div>
 
         {canRaise && (
@@ -134,7 +143,7 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
                 onClick={handleRaise}
                 className="px-6 py-2 rounded font-bold text-sm tracking-widest uppercase transition-all bg-amber-500 text-amber-950 hover:bg-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.3)]"
               >
-                Raise
+                {raiseLabel}
               </button>
             </div>
             

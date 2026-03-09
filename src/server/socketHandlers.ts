@@ -653,7 +653,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
         let nextGame = handleAction(game, payload.playerId, payload.action)
         let handResultEvent: HandResultEvent | undefined
         const handId = getCurrentHandId(payload.gameId)
-        const actionAmount = payload.action.type === ActionType.Raise
+        const actionAmount = (payload.action.type === ActionType.Bet || payload.action.type === ActionType.Raise)
           ? payload.action.amount
           : null
 

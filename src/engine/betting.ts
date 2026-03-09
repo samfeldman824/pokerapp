@@ -354,7 +354,32 @@ export function validateAction(
       return amountToCall > 0
         ? { valid: true }
         : { valid: false, reason: 'Nothing to call' }
+    case ActionType.Bet: {
+      if (currentBet !== 0) {
+        return { valid: false, reason: 'Cannot bet when there is already a bet — use Raise' }
+      }
+
+      if (!Number.isFinite(action.amount) || action.amount <= 0) {
+        return { valid: false, reason: 'Bet amount must be positive' }
+      }
+
+      const contribution = action.amount - player.bet
+      if (contribution > player.chips) {
+        return { valid: false, reason: 'Player does not have enough chips' }
+      }
+
+      const isAllIn = contribution === player.chips
+      if (action.amount < minRaise && !isAllIn) {
+        return { valid: false, reason: `Bet must be at least ${minRaise}` }
+      }
+
+      return { valid: true }
+    }
     case ActionType.Raise: {
+      if (currentBet === 0) {
+        return { valid: false, reason: 'No bet to raise — use Bet' }
+      }
+
       if (!Number.isFinite(action.amount) || action.amount <= currentBet) {
         return { valid: false, reason: 'Raise must exceed the current bet' }
       }
@@ -438,6 +463,7 @@ export function applyAction(game: GameState, action: PlayerAction): GameState {
       }
       break
     }
+    case ActionType.Bet:
     case ActionType.Raise: {
       const contribution = action.amount - actingPlayer.bet
       updatedPlayer = {
@@ -452,7 +478,7 @@ export function applyAction(game: GameState, action: PlayerAction): GameState {
       currentBet = updatedPlayer.bet
 
       if (raiseSize >= previousMinRaise) {
-        // Full raise: update the minimum re-raise size and reopen action to all other players
+        // Full bet/raise: update the minimum re-raise size and reopen action to all other players
         minRaise = raiseSize
         lastRaiseAmount = raiseSize
         playersToAct = getOrderedResponders(
@@ -463,7 +489,7 @@ export function applyAction(game: GameState, action: PlayerAction): GameState {
           actingSeat
         )
       }
-      // Sub-minimum all-in raise: action is NOT reopened (playersToAct unchanged)
+      // Sub-minimum all-in bet/raise: action is NOT reopened (playersToAct unchanged)
 
       break
     }

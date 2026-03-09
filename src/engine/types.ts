@@ -72,6 +72,7 @@ export enum ActionType {
   Fold = 'fold',
   Check = 'check',
   Call = 'call',
+  Bet = 'bet',
   Raise = 'raise',
 }
 
@@ -80,6 +81,7 @@ export type PlayerAction =
   | { type: ActionType.Fold }
   | { type: ActionType.Check }
   | { type: ActionType.Call }
+  | { type: ActionType.Bet; amount: number }
   | { type: ActionType.Raise; amount: number }
 
 /**
