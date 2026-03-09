@@ -189,4 +189,48 @@ describe('gameController', () => {
     const hand2 = startHand({ ...hand1, phase: GamePhase.Showdown })
     expect(hand2.dealerIndex).toBe(1)
   })
+
+  it('startHand() clears lastAction for all players', () => {
+    const lobby = makeGame({ playerCount: 2 })
+    const p0 = bySeat(lobby, 0)
+    const p1 = bySeat(lobby, 1)
+
+    const lobbyWithLastAction: GameState = {
+      ...lobby,
+      players: lobby.players.map(p => ({
+        ...p,
+        lastAction: {
+          type: ActionType.Fold,
+          timestamp: Date.now() - 1000,
+        },
+      })),
+    }
+
+    const started = startHand(lobbyWithLastAction)
+
+    for (const player of started.players) {
+      expect(player.lastAction).toBeNull()
+    }
+  })
+
+  it('getPlayerView() reveals hole cards when shownCards is set for a player', () => {
+    const started = startHand(makeGame({ playerCount: 2 }))
+    const p0 = bySeat(started, 0)
+    const p1 = bySeat(started, 1)
+
+    const gameWithShownCards: GameState = {
+      ...started,
+      shownCards: {
+        [p1.id]: true,
+      },
+    }
+
+    const p0View = getPlayerView(gameWithShownCards, p0.id)
+    const p0ViewSelf = p0View.players.find(p => p?.id === p0.id)
+    const p0ViewOther = p0View.players.find(p => p?.id === p1.id)
+
+    expect(p0ViewSelf?.holeCards).not.toBeNull()
+    expect(p0ViewOther?.holeCards).not.toBeNull()
+    expect(p0ViewOther?.holeCards).toEqual(p1.holeCards)
+  })
 })
