@@ -114,6 +114,7 @@ export interface GameConfig {
   bigBlind: number
   startingStack: number
   timePerAction: number            // seconds per action; 0 = no limit
+  betweenHandsDelay: number
   maxPlayers: number               // 2–9
 }
 

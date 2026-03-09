@@ -15,6 +15,7 @@
 import { eq } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import type { GameConfig, GameState, HandResult, PlayerState } from '../engine/types'
+import { DEFAULT_CONFIG } from '../engine/constants'
 import { GamePhase } from '../engine/types'
 import { db } from './index'
 import { games, handActions, handResults, hands, players } from './schema'
@@ -79,8 +80,14 @@ export async function loadPersistedGame(gameId: string): Promise<GameState | nul
 
   if (gameRow.gameState) {
     const snapshot = gameRow.gameState as Omit<GameState, 'deck'>
+    const config: GameConfig = {
+      ...DEFAULT_CONFIG,
+      ...(snapshot.config as Partial<GameConfig>),
+    }
+
     return {
       ...snapshot,
+      config,
       shownCards: snapshot.shownCards ?? {},
       deck: [],
     }
@@ -99,7 +106,10 @@ export async function loadPersistedGame(gameId: string): Promise<GameState | nul
     .from(players)
     .where(eq(players.gameId, gameId))
 
-  const config = gameRow.config as GameConfig
+  const config: GameConfig = {
+    ...DEFAULT_CONFIG,
+    ...(gameRow.config as Partial<GameConfig>),
+  }
   const persistedPlayers: PlayerState[] = playerRows.map((player) => ({
     id: player.id,
     displayName: player.displayName,
