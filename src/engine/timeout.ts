@@ -49,7 +49,9 @@ export function isTimedOut(game: GameState, now: number): boolean {
  */
 export function autoFoldPlayer(game: GameState): GameState {
   const actingSeat = game.activePlayerIndex
-  const actingPlayer = actingSeat >= 0 ? game.players[actingSeat] : undefined
+  const actingPlayer = actingSeat >= 0
+    ? game.players.find(p => p !== undefined && p.seatIndex === actingSeat)
+    : undefined
 
   if (!actingPlayer || actingPlayer.isFolded || actingPlayer.isAllIn || actingPlayer.chips <= 0) {
     return game

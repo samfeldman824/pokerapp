@@ -256,6 +256,40 @@ export function createGame(config: GameConfig): GameState {
   }
 }
 
+export function resetGame(game: GameState): GameState {
+  const resetPlayers = getSeatedPlayers(game.players).map(player => ({
+    ...player,
+    chips: game.config.startingStack,
+    holeCards: null,
+    bet: 0,
+    totalBetThisHand: 0,
+    isFolded: false,
+    isAllIn: false,
+    lastAction: null,
+  }))
+
+  return {
+    ...game,
+    phase: GamePhase.Waiting,
+    players: resetPlayers,
+    communityCards: [],
+    pot: 0,
+    sidePots: [],
+    dealerIndex: -1,
+    activePlayerIndex: -1,
+    currentBet: 0,
+    minRaise: game.config.bigBlind,
+    deck: [],
+    shownCards: {},
+    handNumber: 0,
+    lastRaiseAmount: game.config.bigBlind,
+    playersToAct: [],
+    timerStart: null,
+    actionTimerStart: null,
+    isPaused: false,
+  }
+}
+
 /**
  * Advances the dealer button to the next occupied seat.
  * On the first hand (`dealerIndex === -1`) the first seated player becomes dealer.

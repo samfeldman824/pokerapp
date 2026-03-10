@@ -17,7 +17,7 @@ import { io as ioc, type Socket as ClientSocket } from 'socket.io-client'
 
 import { createGame } from '../engine/gameController'
 import { DEFAULT_CONFIG } from '../engine/constants'
-import { ActionType, GamePhase, type ClientGameState, type GameConfig, type HandResult } from '../engine/types'
+import { ActionType, GamePhase, type ClientGameState, type GameConfig, type HandResult, type PlayerAction } from '../engine/types'
 import { gameStore } from './gameStore'
 import { registerSocketHandlers } from './socketHandlers'
 
@@ -38,6 +38,7 @@ type PlayerActionPayload = GamePlayerPayload & {
     | { type: ActionType.Fold }
     | { type: ActionType.Check }
     | { type: ActionType.Call }
+    | { type: ActionType.Bet; amount: number }
     | { type: ActionType.Raise; amount: number }
 }
 
@@ -599,6 +600,185 @@ describe('registerSocketHandlers (integration)', () => {
 
     const disconnected = remainingState.players.find((p) => p !== null && p.id === p1)
     expect(disconnected?.isConnected).toBe(false)
+  })
+
+  it('full hand to showdown: 2 players at non-consecutive seats (0, 3) complete all streets via call/check', async () => {
+    const gameId = seedGame({ betweenHandsDelay: 60 })
+    gameIds.push(gameId)
+
+    const host = createClient(port)
+    const other = createClient(port)
+    clients.push(host, other)
+
+    const { playerId: hostId } = await joinGame(host, gameId, 'Host', 0)
+    await waitForEvent(host, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    const { playerId: otherId } = await joinGame(other, gameId, 'Other', 3)
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    host.emit('start-game', { gameId, playerId: hostId })
+    let state = await waitForEvent(host, 'game-state')
+    await waitForEvent(other, 'game-state')
+
+    expect(state.phase).toBe(GamePhase.Preflop)
+    expect(state.communityCards).toHaveLength(0)
+    expect(state.activePlayerIndex).toBeGreaterThanOrEqual(0)
+
+    const socketFor = (id: string) => id === hostId ? host : other
+
+    const act = async (action: PlayerAction): Promise<ClientGameState> => {
+      const actingPlayer = findPlayerBySeat(state, state.activePlayerIndex)
+      const socket = socketFor(actingPlayer.id)
+      const hostNextP = waitForEvent(host, 'game-state')
+      const otherNextP = waitForEvent(other, 'game-state')
+      socket.emit('player-action', { gameId, playerId: actingPlayer.id, action })
+      const [hostState] = await Promise.all([hostNextP, otherNextP])
+      return hostState
+    }
+
+    const actFinal = async (action: PlayerAction) => {
+      const actingPlayer = findPlayerBySeat(state, state.activePlayerIndex)
+      const socket = socketFor(actingPlayer.id)
+      const hostStateP = waitForEvent(host, 'game-state')
+      const otherStateP = waitForEvent(other, 'game-state')
+      const hostHandResultP = waitForEvent(host, 'hand-result')
+      const otherHandResultP = waitForEvent(other, 'hand-result')
+      socket.emit('player-action', { gameId, playerId: actingPlayer.id, action })
+      const [hostState, , handResult] = await Promise.all([hostStateP, otherStateP, hostHandResultP, otherHandResultP])
+      return { state: hostState, handResult }
+    }
+
+    expect(state.activePlayerIndex).toBe(0)
+    state = await act({ type: ActionType.Call })
+    expect(state.phase).toBe(GamePhase.Preflop)
+    expect(state.activePlayerIndex).toBe(3)
+
+    state = await act({ type: ActionType.Check })
+    expect(state.phase).toBe(GamePhase.Flop)
+    expect(state.communityCards).toHaveLength(3)
+    expect(state.pot).toBe(4)
+    expect(state.currentBet).toBe(0)
+
+    expect(state.activePlayerIndex).toBe(3)
+    state = await act({ type: ActionType.Check })
+    expect(state.activePlayerIndex).toBe(0)
+    state = await act({ type: ActionType.Check })
+    expect(state.phase).toBe(GamePhase.Turn)
+    expect(state.communityCards).toHaveLength(4)
+    expect(state.pot).toBe(4)
+
+    expect(state.activePlayerIndex).toBe(3)
+    state = await act({ type: ActionType.Check })
+    expect(state.activePlayerIndex).toBe(0)
+    state = await act({ type: ActionType.Check })
+    expect(state.phase).toBe(GamePhase.River)
+    expect(state.communityCards).toHaveLength(5)
+    expect(state.pot).toBe(4)
+
+    expect(state.activePlayerIndex).toBe(3)
+    state = await act({ type: ActionType.Check })
+    expect(state.activePlayerIndex).toBe(0)
+
+    const { state: finalState, handResult } = await actFinal({ type: ActionType.Check })
+
+    expect(finalState.phase).toBe(GamePhase.Showdown)
+    expect(finalState.communityCards).toHaveLength(5)
+    expect(finalState.activePlayerIndex).toBe(-1)
+
+    expect(handResult.handNumber).toBe(1)
+    expect(handResult.results).toHaveLength(2)
+    expect(handResult.communityCards).toHaveLength(5)
+
+    const p0 = findPlayerBySeat(finalState, 0)
+    const p3 = findPlayerBySeat(finalState, 3)
+    expect(p0.chips + p3.chips).toBe(DEFAULT_CONFIG.startingStack * 2)
+  })
+
+  it('full hand: 3 players at non-consecutive seats (0, 2, 5), raise reopens action, folds to uncontested win', async () => {
+    const gameId = seedGame({ betweenHandsDelay: 60 })
+    gameIds.push(gameId)
+
+    const host = createClient(port)
+    const second = createClient(port)
+    const third = createClient(port)
+    clients.push(host, second, third)
+
+    const { playerId: hostId } = await joinGame(host, gameId, 'Host', 0)
+    await waitForEvent(host, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    const { playerId: secondId } = await joinGame(second, gameId, 'Second', 2)
+    await waitForEvent(second, 'game-state')
+    await waitForEvent(second, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    const { playerId: thirdId } = await joinGame(third, gameId, 'Third', 5)
+    await waitForEvent(third, 'game-state')
+    await waitForEvent(third, 'game-state')
+    await waitForEvent(host, 'game-state')
+    await waitForEvent(second, 'game-state')
+
+    host.emit('start-game', { gameId, playerId: hostId })
+    let state = await waitForEvent(host, 'game-state')
+    await waitForEvent(second, 'game-state')
+    await waitForEvent(third, 'game-state')
+
+    expect(state.phase).toBe(GamePhase.Preflop)
+
+    const allSockets = [host, second, third]
+    const socketFor = (id: string) => {
+      if (id === hostId) return host
+      if (id === secondId) return second
+      return third
+    }
+
+    const act = async (action: PlayerAction): Promise<ClientGameState> => {
+      const actingPlayer = findPlayerBySeat(state, state.activePlayerIndex)
+      const socket = socketFor(actingPlayer.id)
+      const nextStates = allSockets.map(s => waitForEvent(s, 'game-state'))
+      socket.emit('player-action', { gameId, playerId: actingPlayer.id, action })
+      const [hostState] = await Promise.all(nextStates)
+      return hostState
+    }
+
+    const actFinal = async (action: PlayerAction) => {
+      const actingPlayer = findPlayerBySeat(state, state.activePlayerIndex)
+      const socket = socketFor(actingPlayer.id)
+      const nextStates = allSockets.map(s => waitForEvent(s, 'game-state'))
+      const handResults = allSockets.map(s => waitForEvent(s, 'hand-result'))
+      socket.emit('player-action', { gameId, playerId: actingPlayer.id, action })
+      const [states, results] = await Promise.all([Promise.all(nextStates), Promise.all(handResults)])
+      return { state: states[0], handResult: results[0] }
+    }
+
+    expect(state.activePlayerIndex).toBe(0)
+
+    state = await act({ type: ActionType.Raise, amount: 6 })
+    expect(state.currentBet).toBe(6)
+    expect(state.activePlayerIndex).toBe(2)
+
+    state = await act({ type: ActionType.Fold })
+    expect(state.activePlayerIndex).toBe(5)
+    expect(findPlayerBySeat(state, 2).isFolded).toBe(true)
+
+    const { state: finalState, handResult } = await actFinal({ type: ActionType.Fold })
+
+    expect(finalState.phase).toBe(GamePhase.Showdown)
+    expect(finalState.activePlayerIndex).toBe(-1)
+    expect(findPlayerBySeat(finalState, 5).isFolded).toBe(true)
+
+    expect(handResult.handNumber).toBe(1)
+    expect(handResult.results).toHaveLength(3)
+    const utgResult = handResult.results.find(r => r.playerId === hostId)!
+    expect(utgResult.chipDelta).toBeGreaterThan(0)
+
+    const p0 = findPlayerBySeat(finalState, 0)
+    const p2 = findPlayerBySeat(finalState, 2)
+    const p5 = findPlayerBySeat(finalState, 5)
+    expect(p0.chips + p2.chips + p5.chips).toBe(DEFAULT_CONFIG.startingStack * 3)
   })
 
   it('disconnect: host disconnecting transfers host role to next connected player', async () => {

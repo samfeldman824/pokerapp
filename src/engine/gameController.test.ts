@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_CONFIG } from './constants'
-import { advanceDealer, createGame, getPlayerView, getShowdownResults, handleAction, isHandComplete, startHand } from './gameController'
+import { advanceDealer, createGame, getPlayerView, getShowdownResults, handleAction, isHandComplete, resetGame, startHand } from './gameController'
 import { makeGame } from './testUtils'
 import { ActionType, GamePhase, GameState, Rank, Suit } from './types'
 
@@ -232,5 +232,37 @@ describe('gameController', () => {
     expect(p0ViewSelf?.holeCards).not.toBeNull()
     expect(p0ViewOther?.holeCards).not.toBeNull()
     expect(p0ViewOther?.holeCards).toEqual(p1.holeCards)
+  })
+
+  it('resetGame() keeps players but resets chips, phase, and hand state', () => {
+    const lobby = makeGame({ playerCount: 3 })
+    const started = startHand(lobby)
+    const p0 = bySeat(started, 0)
+    const afterAction = handleAction(started, p0.id, { type: ActionType.Fold })
+
+    const reset = resetGame(afterAction)
+
+    expect(reset.phase).toBe(GamePhase.Waiting)
+    expect(reset.pot).toBe(0)
+    expect(reset.communityCards).toEqual([])
+    expect(reset.dealerIndex).toBe(-1)
+    expect(reset.activePlayerIndex).toBe(-1)
+    expect(reset.handNumber).toBe(0)
+    expect(reset.deck).toEqual([])
+    expect(reset.isPaused).toBe(false)
+
+    expect(reset.players).toHaveLength(3)
+    for (const player of reset.players) {
+      expect(player.chips).toBe(reset.config.startingStack)
+      expect(player.holeCards).toBeNull()
+      expect(player.bet).toBe(0)
+      expect(player.totalBetThisHand).toBe(0)
+      expect(player.isFolded).toBe(false)
+      expect(player.isAllIn).toBe(false)
+      expect(player.lastAction).toBeNull()
+    }
+
+    expect(reset.players.map(p => p.seatIndex)).toEqual([0, 1, 2])
+    expect(reset.config).toEqual(afterAction.config)
   })
 })

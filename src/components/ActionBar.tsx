@@ -175,7 +175,7 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
         <div className="w-full md:w-auto flex-shrink-0 flex items-center justify-center md:justify-start">
           <ActionTimer 
             timePerAction={gameState.config.timePerAction} 
-            timerStart={gameState.timerStart} 
+            timerStart={gameState.actionTimerStart} 
             onTimeout={handleTimeout}
           />
         </div>

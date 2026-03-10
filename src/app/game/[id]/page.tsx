@@ -56,6 +56,8 @@ type PendingSeatJoin = {
 type ActionConfirmation = {
   message: string;
   pending: boolean;
+  phase: GamePhase;
+  handNumber: number;
 };
 
 const ACTION_CONFIRMATION_DURATION_MS = 1500;
@@ -264,9 +266,11 @@ export default function GamePage() {
     setActionConfirmation({
       message: formatActionConfirmation(action),
       pending: true,
+      phase: gameState?.phase ?? GamePhase.Waiting,
+      handNumber: gameState?.handNumber ?? 0,
     });
     emit("player-action", { gameId, playerId, action });
-  }, [emit, formatActionConfirmation, gameId, playerId]);
+  }, [emit, formatActionConfirmation, gameId, gameState, playerId]);
 
   useEffect(() => {
     if (!actionConfirmation?.pending || !gameState || !playerId) {
@@ -276,7 +280,11 @@ export default function GamePage() {
     const player = gameState.players.find((candidate) => candidate?.id === playerId);
     const isPlayersTurn = !!player && gameState.activePlayerIndex === player.seatIndex;
 
-    if (isPlayersTurn) {
+    const gameAdvanced =
+      gameState.phase !== actionConfirmation.phase ||
+      gameState.handNumber !== actionConfirmation.handNumber;
+
+    if (isPlayersTurn && !gameAdvanced) {
       return;
     }
 
@@ -356,6 +364,12 @@ export default function GamePage() {
     } else {
       emit("pause-game", { gameId, playerId });
     }
+  };
+
+  /** Resets the game back to Waiting phase, keeping all players but restoring chip stacks. */
+  const handleResetGame = () => {
+    if (!playerId) return;
+    emit("reset-game", { gameId, playerId });
   };
 
   if (isLoading) {
@@ -567,6 +581,12 @@ export default function GamePage() {
               className="px-4 py-1.5 bg-gray-800 hover:bg-gray-700 text-white text-sm font-medium rounded border border-gray-700 transition-colors"
             >
               {gameState?.isPaused ? "Resume" : "Pause"}
+            </button>
+            <button
+              onClick={handleResetGame}
+              className="px-4 py-1.5 bg-red-700 hover:bg-red-600 text-white text-sm font-medium rounded transition-colors"
+            >
+              Reset Game
             </button>
           </div>
         </div>

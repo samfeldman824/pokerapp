@@ -32,6 +32,7 @@ import {
   getShowdownResults,
   handleAction,
   isHandComplete,
+  resetGame,
   startHand,
 } from '../engine/gameController'
 import {
@@ -42,10 +43,10 @@ import {
   markPlayerReconnected,
   shouldAutoFoldDisconnected,
 } from '../engine/playerManager'
-import { autoFoldPlayer, startActionTimer } from '../engine/timeout'
+import { startActionTimer } from '../engine/timeout'
 import { awardPots, calculatePots } from '../engine/potCalculator'
 import { evaluateHandWithRaw } from '../engine/handEvaluator'
-import { advancePhase } from '../engine/betting'
+
 import {
   ActionType,
   Card,
@@ -216,7 +217,7 @@ function getActingPlayer(game: GameState): PlayerState | undefined {
     return undefined
   }
 
-  return game.players[game.activePlayerIndex]
+  return game.players.find(p => p.seatIndex === game.activePlayerIndex)
 }
 
 /** Clears both timer-related timestamp fields from a game state snapshot. */
@@ -228,24 +229,7 @@ function resetTimerState(game: GameState): GameState {
   }
 }
 
-/**
- * Advances a game that is between rounds (no active player, hand not complete).
- * Used after an auto-fold resolves a street without explicit player input.
- *
- * - If we're on the River: go to showdown.
- * - Otherwise: deal the next community cards via `advancePhase`.
- */
-function resolvePendingRound(game: GameState): GameState {
-  if (game.activePlayerIndex !== -1 || isHandComplete(game)) {
-    return game
-  }
 
-  if (game.phase === GamePhase.River) {
-    return getShowdownResults(game)
-  }
-
-  return advancePhase(game)
-}
 
 /**
  * Returns all players who participated in the resolved hand.
@@ -439,7 +423,7 @@ async function autoFoldCurrentPlayerLocked(
 
   clearGameTimer(currentGame.id)
 
-  let nextGame = resolvePendingRound(autoFoldPlayer(currentGame))
+  let nextGame = handleAction(currentGame, expectedPlayerId, { type: ActionType.Fold })
   let handResultEvent: HandResultEvent | undefined
   const handId = getCurrentHandId(currentGame.id)
 
@@ -797,6 +781,35 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
 
         nextGame = scheduleActionTimer(io, nextGame)
         gameStore.set(nextGame.id, nextGame)
+        await saveGame(nextGame)
+        await broadcastGameState(io, nextGame)
+      } catch (error) {
+        emitSocketError(socket, error)
+      }
+    })
+  })
+
+  socket.on('reset-game', (payload: GamePlayerPayload) => {
+    void gameStore.withLock(payload.gameId, async () => {
+      try {
+        const game = await getOrLoadGame(payload.gameId)
+
+        if (!game) {
+          throw new Error('Game not found')
+        }
+
+        if (payload.playerId !== game.hostPlayerId) {
+          throw new Error('Only the host can reset the game')
+        }
+
+        clearGameTimer(payload.gameId)
+        clearNextHandTimer(payload.gameId)
+
+        const nextGame = resetGame(game)
+
+        gameStore.set(nextGame.id, nextGame)
+        activeHandIds.delete(nextGame.id)
+        handActionOrder.delete(nextGame.id)
         await saveGame(nextGame)
         await broadcastGameState(io, nextGame)
       } catch (error) {
