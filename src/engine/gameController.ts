@@ -486,27 +486,38 @@ export function handleAction(game: GameState, playerId: string, action: PlayerAc
   const appliedInternalGame = applyAction(internalGame, action)
   const appliedGame = fromInternalGame(game, appliedInternalGame)
 
+  const remainingPlayers = getRemainingPlayers(appliedGame)
+  if (remainingPlayers.length === 1) {
+    return awardUncontestedPot(appliedGame, remainingPlayers[0])
+  }
+
   if (isRoundComplete(appliedInternalGame)) {
-    const remainingPlayers = getRemainingPlayers(appliedGame)
-
-    if (remainingPlayers.length === 1) {
-      // Everyone else folded — no showdown needed
-      return awardUncontestedPot(appliedGame, remainingPlayers[0])
-    }
-
     if (appliedGame.phase === GamePhase.River) {
       return getShowdownResults(appliedGame)
     }
 
-    const advancedInternalGame = advancePhase(appliedInternalGame)
-    const advancedGame = fromInternalGame(appliedGame, advancedInternalGame)
+    let currentInternalGame = appliedInternalGame
+    let currentGame = appliedGame
 
-    return {
-      ...advancedGame,
-      activePlayerIndex: getNextActivePlayer(toInternalGame(advancedGame)),
-      timerStart: null,
-      actionTimerStart: null,
+    while (currentGame.phase !== GamePhase.River) {
+      const advancedInternalGame = advancePhase(currentInternalGame)
+      const advancedGame = fromInternalGame(currentGame, advancedInternalGame)
+      const nextActive = getNextActivePlayer(toInternalGame(advancedGame))
+
+      if (nextActive !== -1) {
+        return {
+          ...advancedGame,
+          activePlayerIndex: nextActive,
+          timerStart: null,
+          actionTimerStart: null,
+        }
+      }
+
+      currentInternalGame = advancedInternalGame
+      currentGame = advancedGame
     }
+
+    return getShowdownResults(currentGame)
   }
 
   return {

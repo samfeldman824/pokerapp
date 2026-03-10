@@ -8,7 +8,7 @@
  *
  * Round state is tracked through `game.playersToAct`: an ordered array of seat
  * indices that still need to act this street. A round is complete when the
- * list drains to empty (or only one player can still act).
+ * list drains to empty.
  */
 
 import { DEFAULT_CONFIG } from './constants'
@@ -80,11 +80,6 @@ function isEligibleToAct(player: SeatedPlayer): player is PlayerState {
 /** A player can still act only if they're eligible AND have chips remaining. */
 function canStillAct(player: SeatedPlayer): boolean {
   return isEligibleToAct(player) && player.chips > 0
-}
-
-/** Counts how many seated players can still make a betting decision. */
-function getActiveSeatCount(game: GameState): number {
-  return game.players.reduce((count, player) => count + (canStillAct(player) ? 1 : 0), 0)
 }
 
 /**
@@ -508,9 +503,7 @@ export function applyAction(game: GameState, action: PlayerAction): GameState {
     playersToAct,
   }
 
-  // If only one player can still act (or the queue is empty), close action immediately
-  const actionablePlayers = getActiveSeatCount(nextGame)
-  if (actionablePlayers <= 1 || playersToAct.length === 0) {
+  if (playersToAct.length === 0) {
     return {
       ...nextGame,
       activePlayerIndex: -1,
@@ -527,15 +520,11 @@ export function applyAction(game: GameState, action: PlayerAction): GameState {
 /**
  * Returns true when the current betting round is over.
  *
- * A round ends when:
- * - Only one player can still act (everyone else folded or is all-in), OR
- * - The `playersToAct` queue is empty (everyone has acted at the current bet level)
+ * A round ends when the `playersToAct` queue is empty (everyone has acted at
+ * the current bet level). The caller (`handleAction`) separately checks for
+ * an uncontested pot (all but one player folded) before consulting this.
  */
 export function isRoundComplete(game: GameState): boolean {
-  if (getActiveSeatCount(game) <= 1) {
-    return true
-  }
-
   return normalizePlayersToAct(game).length === 0
 }
 
