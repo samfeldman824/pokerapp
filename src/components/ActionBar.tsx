@@ -24,12 +24,15 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
   const allInAmount = playerChips + playerBet;
   
   const [raiseAmount, setRaiseAmount] = useState<number>(minRaise);
+  const [raiseInputValue, setRaiseInputValue] = useState<string>(String(minRaise));
   const raiseInputRef = useRef<HTMLInputElement>(null);
 
   const isPlayerTurn = !!player && gameState.activePlayerIndex >= 0 && player.seatIndex === gameState.activePlayerIndex;
 
   useEffect(() => {
-    setRaiseAmount(Math.min(currentBet + minRaise, allInAmount));
+    const newAmount = Math.min(currentBet + minRaise, allInAmount);
+    setRaiseAmount(newAmount);
+    setRaiseInputValue(String(newAmount));
   }, [minRaise, allInAmount, currentBet]);
 
   const canCheck = currentBet === 0 || playerBet === currentBet;
@@ -121,11 +124,20 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
   const handleFold = () => submitAction({ type: ActionType.Fold });
   const handleCheck = () => submitAction({ type: ActionType.Check });
   const handleCall = () => submitAction({ type: ActionType.Call });
-  const handleRaise = () => submitAction(
-    isBet
-      ? { type: ActionType.Bet, amount: raiseAmount }
-      : { type: ActionType.Raise, amount: raiseAmount }
-  );
+  const handleRaise = () => {
+    const num = Number(raiseInputValue);
+    const minVal = Math.min(currentBet + minRaise, allInAmount);
+    const finalAmount = isNaN(num) || raiseInputValue === ''
+      ? minVal
+      : Math.max(minVal, Math.min(num, allInAmount));
+    setRaiseAmount(finalAmount);
+    setRaiseInputValue(String(finalAmount));
+    submitAction(
+      isBet
+        ? { type: ActionType.Bet, amount: finalAmount }
+        : { type: ActionType.Raise, amount: finalAmount }
+    );
+  };
 
   const handleTimeout = () => {
     if (canCheck) {
@@ -138,6 +150,7 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
   const setRaiseClamped = (val: number) => {
     const clamped = Math.max(Math.min(currentBet + minRaise, allInAmount), Math.min(val, allInAmount));
     setRaiseAmount(clamped);
+    setRaiseInputValue(String(clamped));
   };
 
   const calcHalfPot = () => {
@@ -152,6 +165,7 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
 
   const calcAllIn = () => {
     setRaiseAmount(allInAmount);
+    setRaiseInputValue(String(allInAmount));
   };
 
   if (!isPlayerTurn) {
@@ -225,7 +239,11 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
                 max={allInAmount}
                 step={1}
                 value={raiseAmount}
-                onChange={(e) => setRaiseAmount(Number(e.target.value))}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setRaiseAmount(val);
+                  setRaiseInputValue(String(val));
+                }}
                 disabled={isActing}
                 className="flex-1 h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
               />
@@ -236,8 +254,25 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
                   ref={raiseInputRef}
                   min={Math.min(currentBet + minRaise, allInAmount)}
                   max={allInAmount}
-                  value={raiseAmount}
-                  onChange={(e) => setRaiseClamped(Number(e.target.value))}
+                  value={raiseInputValue}
+                  onChange={(e) => {
+                    setRaiseInputValue(e.target.value);
+                    const num = Number(e.target.value);
+                    if (!isNaN(num) && e.target.value !== '') {
+                      setRaiseAmount(num);
+                    }
+                  }}
+                  onBlur={() => {
+                    const num = Number(raiseInputValue);
+                    if (isNaN(num) || raiseInputValue === '') {
+                      const minVal = Math.min(currentBet + minRaise, allInAmount);
+                      setRaiseAmount(minVal);
+                      setRaiseInputValue(String(minVal));
+                    } else {
+                      setRaiseClamped(num);
+                    }
+                  }}
+                  onFocus={(e) => e.target.select()}
                   disabled={isActing}
                   className="w-24 bg-neutral-950 border border-neutral-800 rounded py-2 pl-7 pr-3 text-amber-400 font-bold text-right focus:outline-none focus:border-amber-500/50 transition-colors"
                 />
