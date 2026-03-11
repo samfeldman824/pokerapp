@@ -111,6 +111,33 @@ describe('betting', () => {
     expect(next).toBe(0)
   })
 
+  it('applyAction() sub-minimum all-in raise must give the opponent a chance to call', () => {
+    const base = withPreflop(makeGame({ playerCount: 2 }))
+    const setupGame: GameState = {
+      ...base,
+      currentBet: 60,
+      minRaise: 40,
+      lastRaiseAmount: 40,
+      activePlayerIndex: 0,
+      playersToAct: [0],
+      players: base.players.map((p, i) => {
+        if (i === 0) return { ...p, chips: 50, bet: 20 }
+        if (i === 1) return { ...p, chips: 940, bet: 60 }
+        return p
+      }),
+    }
+
+    const afterAllIn = applyAction(setupGame, { type: ActionType.Raise, amount: 70 })
+
+    expect(atSeat(afterAllIn, 0).isAllIn).toBe(true)
+    expect(atSeat(afterAllIn, 0).chips).toBe(0)
+    expect(atSeat(afterAllIn, 0).bet).toBe(70)
+    expect(afterAllIn.currentBet).toBe(70)
+    expect(afterAllIn.minRaise).toBe(40)
+    expect(afterAllIn.activePlayerIndex).toBe(1)
+    expect(afterAllIn.playersToAct).toContain(1)
+  })
+
   it('applyAction() Call with all-in partial contribution caps at player chips and sets isAllIn', () => {
     const base = withPreflop(makeGame({ playerCount: 2 }))
     const sbChips = 50

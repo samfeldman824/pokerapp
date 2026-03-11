@@ -29,15 +29,14 @@ export const CommunityCards: React.FC<CommunityCardsProps> = ({ cards, phase }) 
   const slots = Array.from({ length: 5 }, (_, i) => i);
 
   return (
-    <div className="flex gap-4 items-center justify-center h-28 w-full z-10 p-4 bg-black/20 rounded-[4rem] backdrop-blur-md border border-white/5 shadow-inner">
+    <div className="flex gap-4 items-center justify-center h-32 w-full z-10 p-5 bg-gradient-to-b from-black/50 to-black/80 rounded-[3rem] backdrop-blur-xl border border-white/10 shadow-[inset_0_2px_15px_rgba(255,255,255,0.05),0_15px_35px_rgba(0,0,0,0.6)]">
       {slots.map((i) => {
         const card = cards[i];
         const isExpectedPlaceholder = !card && i < expectedCount;
-        const isEmptyPlaceholder = !card && i >= expectedCount;
 
         if (card) {
           return (
-            <div key={i} className="animate-fade-in-up transition-transform hover:-translate-y-2">
+            <div key={i} className="transition-transform duration-300 hover:-translate-y-3 hover:shadow-[0_20px_25px_-5px_rgba(0,0,0,0.5)]">
               <Card card={card} size="lg" />
             </div>
           );
@@ -45,14 +44,17 @@ export const CommunityCards: React.FC<CommunityCardsProps> = ({ cards, phase }) 
 
         if (isExpectedPlaceholder) {
           return (
-            <div key={i} className="w-16 h-24 rounded border-2 border-dashed border-gray-600 bg-gray-900/40 animate-pulse flex items-center justify-center">
-              <span className="text-gray-600/50">...</span>
+            <div key={i} className="w-[4.5rem] h-24 rounded-lg border border-amber-500/40 bg-gradient-to-b from-amber-900/20 to-transparent shadow-[inset_0_0_20px_rgba(245,158,11,0.15)] animate-pulse relative overflow-hidden">
+              <div className="absolute inset-0 bg-amber-500/5 mix-blend-overlay"></div>
             </div>
           );
         }
 
         return (
-          <div key={i} className="w-16 h-24 rounded border border-gray-700 bg-gray-900/20" />
+          <div key={i} className="w-[4.5rem] h-24 rounded-lg border border-white/5 bg-gradient-to-br from-white/[0.04] to-transparent shadow-[inset_0_2px_10px_rgba(0,0,0,0.5)] relative">
+            <div className="absolute inset-0 bg-black/40 rounded-lg"></div>
+            <div className="absolute inset-x-2 inset-y-3 border border-white/[0.03] rounded opacity-50"></div>
+          </div>
         );
       })}
     </div>

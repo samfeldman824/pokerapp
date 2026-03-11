@@ -75,6 +75,24 @@ describe('gameController', () => {
     expect(isHandComplete(folded)).toBe(true)
   })
 
+  it('handleAction() after preflop all-in the opponent must be able to call before the phase advances', () => {
+    const started = startHand(makeGame({ playerCount: 2 }))
+    const activeSeat = started.activePlayerIndex
+    const otherSeat = activeSeat === 0 ? 1 : 0
+    const actingPlayer = bySeat(started, activeSeat)
+
+    const allInAmount = actingPlayer.chips + actingPlayer.bet
+    const afterAllIn = handleAction(started, actingPlayer.id, { type: ActionType.Raise, amount: allInAmount })
+
+    expect(afterAllIn.phase).toBe(GamePhase.Preflop)
+    expect(afterAllIn.activePlayerIndex).toBe(otherSeat)
+    expect(afterAllIn.currentBet).toBe(allInAmount)
+
+    const opponent = bySeat(started, otherSeat)
+    const afterCall = handleAction(afterAllIn, opponent.id, { type: ActionType.Call })
+    expect(afterCall.phase).not.toBe(GamePhase.Preflop)
+  })
+
   it('isHandComplete() false during preflop; true after showdown', () => {
     const started = startHand(makeGame({ playerCount: 2 }))
     expect(isHandComplete(started)).toBe(false)

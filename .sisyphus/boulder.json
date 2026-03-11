@@ -1,13 +1,11 @@
 {
-  "active_plan": "/Users/samfeldman/Code/pokerapp/.sisyphus/plans/poker-app-mvp.md",
-  "started_at": "2026-03-07T06:11:19.028Z",
+  "active_plan": "/Users/samfeldman/Code/pokerapp/.sisyphus/plans/gameplay-enhancements.md",
+  "started_at": "2026-03-09T04:29:23.037Z",
   "session_ids": [
-    "ses_339288024ffekjrNBc1RTOSNBC",
-    "ses_338fc9239ffeirkEKt06jWZMNd",
-    "ses_338fba8a5ffebncNoYY0kdMaaU",
-    "ses_338fa0a20ffeg6k3yJ8vn5pcCL"
+    "ses_32f24a32effeeujqBSueXzudY2",
+    "ses_32efc8073ffenB3sUreOWRZ8sI"
   ],
-  "plan_name": "poker-app-mvp",
+  "plan_name": "gameplay-enhancements",
   "agent": "atlas",
   "worktree_path": "/Users/samfeldman/Code/pokerapp"
 }

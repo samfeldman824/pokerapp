@@ -224,6 +224,40 @@ test('game page loads correctly and handles invalid game IDs', async ({ page }) 
   expect(gameNotFound + returnHome).toBeGreaterThan(0);
 });
 
+test('all-in: opponent sees an enabled Call button and can complete the hand', async ({ browser }) => {
+  const ctx1: BrowserContext = await browser.newContext();
+  const ctx2: BrowserContext = await browser.newContext();
+  const alicePage: Page = await ctx1.newPage();
+  const bobPage: Page = await ctx2.newPage();
+
+  try {
+    const gameId = await createGame(alicePage);
+    await joinGame(bobPage, gameId, 'Bob', 1);
+
+    await alicePage.getByRole('button', { name: /start game/i }).click();
+    await expect(alicePage.getByText(/waiting for host/i)).not.toBeVisible({ timeout: 15000 });
+
+    await alicePage.waitForSelector('button:text("Fold")', { timeout: 15000 });
+    await alicePage.locator('button:text("All-in")').click();
+    await alicePage.locator('button:text("Raise")').click();
+
+    await bobPage.waitForSelector('button:text("Call")', { timeout: 15000 });
+    const callButton = bobPage.locator('button:text("Call")').first();
+    await expect(callButton).toBeEnabled();
+
+    await callButton.click();
+
+    await alicePage.waitForTimeout(1000);
+    const aliveAfter =
+      (await alicePage.locator('text=Connected').count()) +
+      (await bobPage.locator('text=Connected').count());
+    expect(aliveAfter).toBeGreaterThan(0);
+  } finally {
+    await ctx1.close();
+    await ctx2.close();
+  }
+});
+
 test('occupied seat is disabled in join modal', async ({ browser }) => {
   const ctx1: BrowserContext = await browser.newContext();
   const ctx2: BrowserContext = await browser.newContext();

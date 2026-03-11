@@ -480,14 +480,15 @@ export function applyAction(game: GameState, action: PlayerAction): GameState {
       if (raiseSize >= previousMinRaise) {
         minRaise = raiseSize
         lastRaiseAmount = raiseSize
-        playersToAct = getOrderedResponders(
-          {
-            ...game,
-            players: replacePlayer([...game.players], actingSeat, updatedPlayer),
-          },
-          actingSeat
-        )
       }
+
+      playersToAct = getOrderedResponders(
+        {
+          ...game,
+          players: replacePlayer([...game.players], actingSeat, updatedPlayer),
+        },
+        actingSeat
+      )
 
       break
     }
