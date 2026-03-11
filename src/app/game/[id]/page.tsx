@@ -24,6 +24,7 @@ import { useCallback, useEffect, useRef, useState, FormEvent } from "react";
 import { useParams } from "next/navigation";
 import PokerTable from "@/components/PokerTable";
 import { SessionLedger } from "@/components/SessionLedger";
+import { InviteShare } from "@/components/InviteShare";
 import { useGameSocket } from "@/lib/useGameSocket";
 import { PlayerAction, GamePhase, ActionType } from "@/engine/types";
 import Link from "next/link";
@@ -82,6 +83,7 @@ export default function GamePage() {
   const [pendingSeatJoin, setPendingSeatJoin] = useState<PendingSeatJoin | null>(null);
 
   const [showLedger, setShowLedger] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
 
   /**
    * Transient banner shown at the top of the screen on disconnect/reconnect.
@@ -513,12 +515,20 @@ export default function GamePage() {
             Players: <span className="text-white font-medium">{gameState?.players.filter(Boolean).length || gameInfo?.playerCount || 0}/{gameInfo?.maxPlayers || 0}</span>
           </div>
 
-          <button
-            onClick={() => setShowLedger(true)}
-            className="px-4 py-1.5 bg-gray-800 hover:bg-gray-700 text-white text-sm font-medium rounded border border-gray-700 transition-colors"
-          >
-            Session Ledger
-          </button>
+          <div className="flex items-center space-x-3">
+            <button
+              onClick={() => setShowInvite(true)}
+              className="px-4 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 text-sm font-medium rounded border border-indigo-500/30 transition-colors"
+            >
+              Invite
+            </button>
+            <button
+              onClick={() => setShowLedger(true)}
+              className="px-4 py-1.5 bg-gray-800 hover:bg-gray-700 text-white text-sm font-medium rounded border border-gray-700 transition-colors"
+            >
+              Session Ledger
+            </button>
+          </div>
 
           <div
             className={
@@ -625,6 +635,7 @@ export default function GamePage() {
 
       {showJoinModal && renderJoinModal()}
       {showLedger && <SessionLedger gameId={gameId} onClose={() => setShowLedger(false)} gameState={gameState} lastHandResult={lastHandResult} />}
+      {showInvite && <InviteShare gameUrl={typeof window !== 'undefined' ? window.location.href : ''} onClose={() => setShowInvite(false)} />}
     </div>
   );
 }
