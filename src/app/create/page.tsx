@@ -205,16 +205,22 @@ export default function CreateGamePage() {
     setErrors({});
 
     try {
-      const payload: any = { ...formData };
-      if (formData.enableBlindSchedule) {
-        payload.blindSchedule = BLIND_PRESETS[formData.blindSchedulePreset].schedule;
-        payload.blindIncreaseInterval = formData.blindIncreaseInterval;
-      } else {
-        delete payload.blindSchedule;
-        delete payload.blindIncreaseInterval;
-      }
-      delete payload.enableBlindSchedule;
-      delete payload.blindSchedulePreset;
+      type GamePayload = {
+        hostDisplayName: string;
+        hostSeatIndex: number;
+        smallBlind: number;
+        bigBlind: number;
+        startingStack: number;
+        timePerAction: number;
+        betweenHandsDelay: number;
+        maxPlayers: number;
+        blindSchedule?: { smallBlind: number; bigBlind: number }[];
+        blindIncreaseInterval?: number;
+      };
+      const { enableBlindSchedule, blindSchedulePreset, ...rest } = formData;
+      const payload: GamePayload = enableBlindSchedule
+        ? { ...rest, blindSchedule: BLIND_PRESETS[blindSchedulePreset].schedule, blindIncreaseInterval: formData.blindIncreaseInterval }
+        : rest;
 
       const res = await fetch("/api/games", {
         method: "POST",
