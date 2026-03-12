@@ -113,7 +113,10 @@ export function ChatPanel({
               : (isMe ? 'bg-emerald-800 text-white' : 'bg-gray-800 text-gray-200')
             return (
               <div key={msg.id || i} className={`group flex flex-col ${alignClass} `}>
-                <span className={`text-xs font-bold ${nameColor} mb-0.5 ${isMe ? 'mr-1' : 'ml-1'}`}>{msg.senderName}</span>
+                <div className="flex items-baseline gap-1.5 mb-0.5">
+                  <span className={`text-xs font-bold ${nameColor}`}>{msg.senderName}</span>
+                  <span className="text-[10px] text-gray-500">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
                 <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${bgClass}`}>
                   {msg.text}
                 </div>
