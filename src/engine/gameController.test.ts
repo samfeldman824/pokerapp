@@ -99,7 +99,7 @@ describe('gameController', () => {
     expect(isHandComplete({ ...started, phase: GamePhase.Showdown })).toBe(true)
   })
 
-  it('getPlayerView() hides other hole cards; reveals at showdown; does not expose token', () => {
+  it('getPlayerView() hides other hole cards unless explicitly shown; does not expose token', () => {
     const started = startHand(makeGame({ playerCount: 2 }))
     const viewer = bySeat(started, 0)
     const other = bySeat(started, 1)
@@ -120,9 +120,10 @@ describe('gameController', () => {
     expect(tokenInView).toBe(false)
 
     const showdownView = getPlayerView({ ...started, phase: GamePhase.Showdown }, viewer.id)
-    const showdownActivePlayers = showdownView.players.filter(Boolean)
-    expect(showdownActivePlayers.length).toBe(started.players.length)
-    expect(showdownActivePlayers.every(p => p!.holeCards !== null)).toBe(true)
+    const showdownViewer = showdownView.players.find(p => p?.id === viewer.id)
+    const showdownOther = showdownView.players.find(p => p?.id === other.id)
+    expect(showdownViewer?.holeCards).not.toBeNull()
+    expect(showdownOther?.holeCards).toBeNull()
   })
 
   it('splits odd pots with remainder to first player by seat', () => {

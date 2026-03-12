@@ -254,7 +254,7 @@ describe('registerSocketHandlers (integration)', () => {
 
   const originalSetTimeout = globalThis.setTimeout
 
-  beforeAll(() => {
+  beforeAll(async () => {
     globalThis.setTimeout = ((...args: Parameters<typeof setTimeout>): ReturnType<typeof setTimeout> => {
       const handle = originalSetTimeout(...args)
       const delay = args[1]
@@ -265,20 +265,25 @@ describe('registerSocketHandlers (integration)', () => {
 
       return handle
     }) as typeof setTimeout
-  })
-
-  afterAll(() => {
-    globalThis.setTimeout = originalSetTimeout
-  })
-
-  beforeEach(async () => {
-    clients = []
-    gameIds = []
 
     const created = await createTestServer()
     httpServer = created.httpServer
     io = created.io
     port = created.port
+  })
+
+  afterAll(() => {
+    io.disconnectSockets(true)
+    io.close()
+    if (httpServer.listening) {
+      httpServer.close()
+    }
+    globalThis.setTimeout = originalSetTimeout
+  })
+
+  beforeEach(() => {
+    clients = []
+    gameIds = []
   })
 
   afterEach(async () => {
@@ -287,17 +292,7 @@ describe('registerSocketHandlers (integration)', () => {
       client.close()
     })
 
-    await io.disconnectSockets(true)
-
-    await new Promise<void>((resolve, reject) => {
-      io.close((error) => {
-        if (error) {
-          reject(error)
-          return
-        }
-        resolve()
-      })
-    })
+    io.disconnectSockets(true)
 
     gameIds.forEach((gameId) => gameStore.delete(gameId))
   })
@@ -695,6 +690,73 @@ describe('registerSocketHandlers (integration)', () => {
     const p0 = findPlayerBySeat(finalState, 0)
     const p3 = findPlayerBySeat(finalState, 3)
     expect(p0.chips + p3.chips).toBe(DEFAULT_CONFIG.startingStack * 2)
+  })
+
+  it('showdown visibility: each player sees own hole cards, opponents stay hidden', async () => {
+    const gameId = seedGame({ betweenHandsDelay: 60 })
+    gameIds.push(gameId)
+
+    const host = createClient(port)
+    const other = createClient(port)
+    clients.push(host, other)
+
+    const { playerId: hostId } = await joinGame(host, gameId, 'Host', 0)
+    await waitForEvent(host, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    const { playerId: otherId } = await joinGame(other, gameId, 'Other', 3)
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    host.emit('start-game', { gameId, playerId: hostId })
+    let state = await waitForEvent(host, 'game-state')
+    await waitForEvent(other, 'game-state')
+
+    const socketFor = (id: string) => id === hostId ? host : other
+
+    const act = async (action: PlayerAction): Promise<ClientGameState> => {
+      const actingPlayer = findPlayerBySeat(state, state.activePlayerIndex)
+      const socket = socketFor(actingPlayer.id)
+      const hostNextP = waitForEvent(host, 'game-state')
+      const otherNextP = waitForEvent(other, 'game-state')
+      socket.emit('player-action', { gameId, playerId: actingPlayer.id, action })
+      const [hostState] = await Promise.all([hostNextP, otherNextP])
+      return hostState
+    }
+
+    const actFinal = async (action: PlayerAction): Promise<{ hostState: ClientGameState; otherState: ClientGameState }> => {
+      const actingPlayer = findPlayerBySeat(state, state.activePlayerIndex)
+      const socket = socketFor(actingPlayer.id)
+      const hostStateP = waitForEvent(host, 'game-state')
+      const otherStateP = waitForEvent(other, 'game-state')
+      socket.emit('player-action', { gameId, playerId: actingPlayer.id, action })
+      const [hostState, otherState] = await Promise.all([hostStateP, otherStateP])
+      return { hostState, otherState }
+    }
+
+    state = await act({ type: ActionType.Call })
+    state = await act({ type: ActionType.Check })
+    state = await act({ type: ActionType.Check })
+    state = await act({ type: ActionType.Check })
+    state = await act({ type: ActionType.Check })
+    state = await act({ type: ActionType.Check })
+    state = await act({ type: ActionType.Check })
+
+    const { hostState: finalHostState, otherState: finalOtherState } = await actFinal({ type: ActionType.Check })
+
+    expect(finalHostState.phase).toBe(GamePhase.Showdown)
+    expect(finalOtherState.phase).toBe(GamePhase.Showdown)
+
+    const hostViewHost = finalHostState.players.find((p) => p !== null && p.id === hostId)
+    const hostViewOther = finalHostState.players.find((p) => p !== null && p.id === otherId)
+    const otherViewHost = finalOtherState.players.find((p) => p !== null && p.id === hostId)
+    const otherViewOther = finalOtherState.players.find((p) => p !== null && p.id === otherId)
+
+    expect(hostViewHost?.holeCards).not.toBeNull()
+    expect(hostViewOther?.holeCards).toBeNull()
+    expect(otherViewHost?.holeCards).toBeNull()
+    expect(otherViewOther?.holeCards).not.toBeNull()
   })
 
   it('full hand: 3 players at non-consecutive seats (0, 2, 5), raise reopens action, folds to uncontested win', async () => {

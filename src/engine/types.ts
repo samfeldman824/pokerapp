@@ -4,7 +4,7 @@
  * Two representations of game state exist:
  * - `GameState`        — Full server-side state (includes deck, player tokens, all hole cards)
  * - `ClientGameState` — Scrubbed version safe to send over the wire (no deck, no tokens,
- *                        opponents' hole cards hidden until showdown)
+ *                        opponents' hole cards hidden unless explicitly shown)
  *
  * Two representations of the player list exist:
  * - Compact (canonical): `players` is a dense sorted array of all seated players.
@@ -172,7 +172,7 @@ export type ClientPlayerState = Omit<PlayerState, 'holeCards' | 'token'> & {
  * - `deck` — always removed; clients must never see undealt cards
  * - Each player's `token` — see `ClientPlayerState` above
  *
- * Player hole cards are hidden for opponents (shown only to the owner and at showdown).
+ * Player hole cards are hidden for opponents (shown only to the owner or when explicitly shown).
  * The player array uses `null` slots to preserve seat indices in the sparse internal format
  * that some client rendering logic depends on.
  */

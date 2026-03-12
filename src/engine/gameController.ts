@@ -567,7 +567,7 @@ export function isHandComplete(game: GameState): boolean {
  * Two server-only fields are stripped before sending to clients:
  * - `deck` — always removed (no client should see undealt cards)
  * - `token` — always removed from every player (reconnection secret)
- * - `holeCards` — revealed only to the owning player (or to everyone at showdown)
+ * - `holeCards` — revealed only to the owning player or when explicitly shown
  */
 export function getPlayerView(game: GameState, playerId: string): ClientGameState {
   const { deck: _deck, players, ...rest } = game
@@ -581,7 +581,7 @@ export function getPlayerView(game: GameState, playerId: string): ClientGameStat
     const { token: _token, holeCards, ...playerWithoutToken } = player
     seatIndexedPlayers[player.seatIndex] = {
       ...playerWithoutToken,
-      holeCards: game.phase === GamePhase.Showdown || player.id === playerId || game.shownCards[player.id]
+      holeCards: player.id === playerId || game.shownCards[player.id]
         ? holeCards
         : null,
     }
