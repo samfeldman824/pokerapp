@@ -733,6 +733,16 @@ export default function GamePage() {
       {showHandHistory && <HandHistory gameId={gameId} onClose={() => setShowHandHistory(false)} />}
       {showLedger && <SessionLedger gameId={gameId} onClose={() => setShowLedger(false)} gameState={gameState} lastHandResult={lastHandResult} />}
       {showInvite && <InviteShare gameUrl={typeof window !== 'undefined' ? window.location.href : ''} onClose={() => setShowInvite(false)} />}
+      {(playerId || spectatorId) && (
+        <ChatPanel
+          messages={chatMessages}
+          onSendMessage={handleSendChatMessage}
+          isOpen={isChatOpen}
+          onToggle={handleToggleChat}
+          unreadCount={unreadCount}
+          currentUserId={playerId ?? spectatorId}
+        />
+      )}
     </div>
   );
 }

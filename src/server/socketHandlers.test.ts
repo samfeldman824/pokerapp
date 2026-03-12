@@ -806,4 +806,261 @@ describe('registerSocketHandlers (integration)', () => {
     const otherPlayer = stateAfterDisconnect.players.find(p => p !== null && p.id !== hostId)
     expect(stateAfterDisconnect.hostPlayerId).toBe(otherPlayer?.id)
   })
+
+  // ---------------------------------------------------------------------------
+  // Wave 3: Spectator mode tests
+  // ---------------------------------------------------------------------------
+
+  it('join-game (spectator): joining with spectator:true emits joined with spectatorId (no playerId)', async () => {
+    const gameId = seedGame()
+    gameIds.push(gameId)
+
+    const spectator = createClient(port)
+    clients.push(spectator)
+
+    const joinedP = new Promise<{ spectatorId?: string; playerId?: string }>((resolve) => {
+      const raw = spectator as unknown as { on: (event: string, handler: (payload: unknown) => void) => void }
+      raw.on('joined', (payload) => resolve(payload as { spectatorId?: string; playerId?: string }))
+    })
+
+    const rawSpectator = spectator as unknown as { emit: (event: string, payload: unknown) => void }
+    rawSpectator.emit('join-game', { gameId, displayName: 'Viewer', spectator: true })
+
+    const joined = await joinedP
+    expect(joined.spectatorId).toBeTruthy()
+    expect(joined.playerId).toBeUndefined()
+  })
+
+  it('join-game (spectator): spectator receives game-state with no hole cards for other players', async () => {
+    const gameId = seedGame()
+    gameIds.push(gameId)
+
+    const player = createClient(port)
+    clients.push(player)
+    await joinGame(player, gameId, 'Alice', 0)
+    await waitForEvent(player, 'game-state')
+    await waitForEvent(player, 'game-state')
+
+    const spectator = createClient(port)
+    clients.push(spectator)
+
+    const gameStateP = new Promise<ClientGameState>((resolve) => {
+      const raw = spectator as unknown as { on: (event: string, handler: (payload: unknown) => void) => void }
+      raw.on('game-state', (payload) => resolve(payload as ClientGameState))
+    })
+
+    const rawSpectator = spectator as unknown as { emit: (event: string, payload: unknown) => void }
+    rawSpectator.emit('join-game', { gameId, displayName: 'Viewer', spectator: true })
+
+    const state = await gameStateP
+    expect(state.id).toBe(gameId)
+    const playerWithCards = state.players.find(p => p !== null && p.holeCards !== null)
+    expect(playerWithCards).toBeUndefined()
+  })
+
+  it('join-game (spectator): spectator count appears in game state after joining', async () => {
+    const gameId = seedGame()
+    gameIds.push(gameId)
+
+    const player = createClient(port)
+    clients.push(player)
+    const { playerId } = await joinGame(player, gameId, 'Alice', 0)
+    await waitForEvent(player, 'game-state')
+    const initialState = await waitForEvent(player, 'game-state')
+    expect(initialState.players.filter(Boolean).length).toBe(1)
+
+    const spectator = createClient(port)
+    clients.push(spectator)
+
+    const rawSpectator = spectator as unknown as { emit: (event: string, payload: unknown) => void }
+    rawSpectator.emit('join-game', { gameId, displayName: 'Viewer', spectator: true })
+
+    const stateAfterSpectator = await waitForEvent(player, 'game-state')
+    expect(stateAfterSpectator.spectators).toHaveLength(1)
+    expect(stateAfterSpectator.spectators[0].displayName).toBe('Viewer')
+    expect(playerId).toBeTruthy()
+  })
+
+  it('join-game (spectator): spectator cannot perform player-action', async () => {
+    const gameId = seedGame()
+    gameIds.push(gameId)
+
+    const host = createClient(port)
+    const other = createClient(port)
+    const spectatorClient = createClient(port)
+    clients.push(host, other, spectatorClient)
+
+    const { playerId: hostId } = await joinGame(host, gameId, 'Host', 0)
+    await waitForEvent(host, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    await joinGame(other, gameId, 'Other', 1)
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    host.emit('start-game', { gameId, playerId: hostId })
+    const gameStarted = await waitForEvent(host, 'game-state')
+    await waitForEvent(other, 'game-state')
+
+    expect(gameStarted.phase).toBe(GamePhase.Preflop)
+
+    const rawSpectatorClient = spectatorClient as unknown as { emit: (event: string, payload: unknown) => void }
+    rawSpectatorClient.emit('join-game', { gameId, displayName: 'Watcher', spectator: true })
+
+    await waitForEvent(host, 'game-state')
+
+    const errP = new Promise<{ message: string }>((resolve) => {
+      const raw = spectatorClient as unknown as { on: (event: string, handler: (payload: unknown) => void) => void }
+      raw.on('error', (payload) => resolve(payload as { message: string }))
+    })
+
+    const actingSeat = gameStarted.activePlayerIndex
+    const actingPlayer = findPlayerBySeat(gameStarted, actingSeat)
+
+    spectatorClient.emit('player-action', {
+      gameId,
+      playerId: actingPlayer.id,
+      action: { type: ActionType.Fold },
+    })
+
+    const err = await errP
+    expect(err.message).toBe('Spectators cannot perform actions')
+  })
+
+  it('chat-message: valid message broadcasts to room', async () => {
+    const gameId = seedGame()
+    gameIds.push(gameId)
+
+    const c1 = createClient(port)
+    const c2 = createClient(port)
+    clients.push(c1, c2)
+
+    const { playerId: p1 } = await joinGame(c1, gameId, 'Alice', 0)
+    await waitForEvent(c1, 'game-state')
+    await waitForEvent(c1, 'game-state')
+
+    await joinGame(c2, gameId, 'Bob', 1)
+    await waitForEvent(c2, 'game-state')
+    await waitForEvent(c2, 'game-state')
+    await waitForEvent(c1, 'game-state')
+
+    const chatP = new Promise<{
+      id: string
+      senderId: string
+      senderName: string
+      text: string
+      type: string
+    }>((resolve) => {
+      const raw = c2 as unknown as { on: (event: string, handler: (payload: unknown) => void) => void }
+      raw.on('chat-broadcast', (payload) => resolve(payload as { id: string; senderId: string; senderName: string; text: string; type: string }))
+    })
+
+    const rawC1 = c1 as unknown as { emit: (event: string, payload: unknown) => void }
+    rawC1.emit('chat-message', { gameId, senderId: p1, senderName: 'Alice', text: 'Hello everyone', type: 'custom' })
+
+    const msg = await chatP
+    expect(msg.text).toBe('Hello everyone')
+    expect(msg.senderId).toBe(p1)
+    expect(msg.senderName).toBe('Alice')
+    expect(msg.type).toBe('custom')
+    expect(msg.id).toBeTruthy()
+  })
+
+  it('chat-message: reaction message broadcasts correctly', async () => {
+    const gameId = seedGame()
+    gameIds.push(gameId)
+
+    const c1 = createClient(port)
+    clients.push(c1)
+
+    const { playerId: p1 } = await joinGame(c1, gameId, 'Alice', 0)
+    await waitForEvent(c1, 'game-state')
+    await waitForEvent(c1, 'game-state')
+
+    const chatP = new Promise<{ text: string; type: string }>((resolve) => {
+      const raw = c1 as unknown as { on: (event: string, handler: (payload: unknown) => void) => void }
+      raw.on('chat-broadcast', (payload) => resolve(payload as { text: string; type: string }))
+    })
+
+    const rawC1 = c1 as unknown as { emit: (event: string, payload: unknown) => void }
+    rawC1.emit('chat-message', { gameId, senderId: p1, senderName: 'Alice', text: 'GG', type: 'reaction' })
+
+    const msg = await chatP
+    expect(msg.text).toBe('GG')
+    expect(msg.type).toBe('reaction')
+  })
+
+  it('chat-message: invalid reaction emits error', async () => {
+    const gameId = seedGame()
+    gameIds.push(gameId)
+
+    const c1 = createClient(port)
+    clients.push(c1)
+
+    const { playerId: p1 } = await joinGame(c1, gameId, 'Alice', 0)
+    await waitForEvent(c1, 'game-state')
+    await waitForEvent(c1, 'game-state')
+
+    const errP = waitForEvent(c1, 'error')
+
+    const rawC1 = c1 as unknown as { emit: (event: string, payload: unknown) => void }
+    rawC1.emit('chat-message', { gameId, senderId: p1, senderName: 'Alice', text: 'NOT A REACTION', type: 'reaction' })
+
+    const err = await errP
+    expect(err.message).toBe('Invalid reaction')
+  })
+
+  it('chat-message: rate limiting blocks 6th message in 10s window', async () => {
+    const gameId = seedGame()
+    gameIds.push(gameId)
+
+    const c1 = createClient(port)
+    clients.push(c1)
+
+    await joinGame(c1, gameId, 'Alice', 0)
+    await waitForEvent(c1, 'game-state')
+    await waitForEvent(c1, 'game-state')
+
+    const uniqueSender = `rate-limit-test-${randomUUID()}`
+    const rawC1 = c1 as unknown as { emit: (event: string, payload: unknown) => void; once: (event: string, handler: () => void) => void }
+
+    const sent: Promise<void>[] = []
+    for (let i = 0; i < 5; i++) {
+      const broadcastReceived = new Promise<void>((resolve) => {
+        const raw = c1 as unknown as { once: (event: string, handler: () => void) => void }
+        raw.once('chat-broadcast', resolve)
+      })
+      rawC1.emit('chat-message', { gameId, senderId: uniqueSender, senderName: 'Alice', text: `Message ${i + 1}`, type: 'custom' })
+      sent.push(broadcastReceived)
+    }
+
+    await Promise.all(sent)
+
+    const errP = waitForEvent(c1, 'error')
+    rawC1.emit('chat-message', { gameId, senderId: uniqueSender, senderName: 'Alice', text: 'This should be blocked', type: 'custom' })
+
+    const err = await errP
+    expect(err.message).toContain('Too many chat messages')
+  })
+
+  it('chat-message: empty message emits error', async () => {
+    const gameId = seedGame()
+    gameIds.push(gameId)
+
+    const c1 = createClient(port)
+    clients.push(c1)
+
+    const { playerId: p1 } = await joinGame(c1, gameId, 'Alice', 0)
+    await waitForEvent(c1, 'game-state')
+    await waitForEvent(c1, 'game-state')
+
+    const errP = waitForEvent(c1, 'error')
+
+    const rawC1 = c1 as unknown as { emit: (event: string, payload: unknown) => void }
+    rawC1.emit('chat-message', { gameId, senderId: p1, senderName: 'Alice', text: '   ', type: 'custom' })
+
+    const err = await errP
+    expect(err.message).toBe('Message cannot be empty')
+  })
 })
