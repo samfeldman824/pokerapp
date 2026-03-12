@@ -435,6 +435,11 @@ export default function GamePage() {
     emit("reset-game", { gameId, playerId });
   };
 
+  const handleRebuy = () => {
+    if (!playerId) return;
+    emit("rebuy", { gameId, playerId });
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-950 text-gray-200">
@@ -704,7 +709,7 @@ export default function GamePage() {
         
         {gameState && (playerId || spectatorId) ? (
           <div className="w-full h-full p-4 relative z-10">
-            <PokerTable gameState={gameState} playerId={playerId ?? ""} onAction={handleAction} actionConfirmation={actionConfirmation} />
+            <PokerTable gameState={gameState} playerId={playerId ?? ""} onAction={handleAction} actionConfirmation={actionConfirmation} lastHandResult={lastHandResult} />
             {playerId && (() => {
               const activePlayers = gameState.players.filter(p => p && !p.isFolded);
               const isUncontestedWin = gameState.phase === GamePhase.Showdown && activePlayers.length === 1;
@@ -719,6 +724,27 @@ export default function GamePage() {
                   </div>
                 );
               }
+
+              const startingStack = gameState.config.startingStack;
+              const currentPlayer = gameState.players.find(p => p?.id === playerId);
+              const playerChips = currentPlayer?.chips ?? 0;
+              const isBetweenHands = gameState.phase === GamePhase.Waiting || gameState.phase === GamePhase.Showdown;
+              const canRebuy = isBetweenHands && playerChips < startingStack;
+
+              if (canRebuy) {
+                const rebuyLabel = playerChips === 0 ? 'Rebuy' : 'Top Up';
+                return (
+                  <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50">
+                    <button
+                      onClick={handleRebuy}
+                      className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg shadow-lg transition-colors"
+                    >
+                      {rebuyLabel}
+                    </button>
+                  </div>
+                );
+              }
+
               return null;
             })()}
           </div>

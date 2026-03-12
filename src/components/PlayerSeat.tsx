@@ -13,6 +13,8 @@ interface PlayerSeatProps {
   isSmallBlind?: boolean;
   isBigBlind?: boolean;
   badgeAbove?: boolean;
+  isWinner?: boolean;
+  winHandNumber?: number;
 }
 
 export const PlayerSeat: React.FC<PlayerSeatProps> = ({ 
@@ -25,6 +27,8 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
   isSmallBlind,
   isBigBlind,
   badgeAbove = false,
+  isWinner = false,
+  winHandNumber,
 }) => {
   const [showAction, setShowAction] = useState(false);
   const handStrength = useMemo(() => {
@@ -109,6 +113,10 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
       {isActive && (
         <div className="absolute -inset-3 rounded-full border-[3px] border-amber-400/80 animate-pulse shadow-[0_0_20px_rgba(251,191,36,0.6)] z-0" />
       )}
+      
+      {isWinner && (
+        <div key={`win-glow-${winHandNumber}`} className="absolute -inset-4 rounded-full border-4 border-amber-400 animate-pot-win z-0 pointer-events-none" />
+      )}
 
       {isDealer && (
         <div className="absolute -right-3 top-0 w-6 h-6 rounded-full bg-white border-2 border-gray-900 shadow-md text-gray-900 font-bold text-xs flex items-center justify-center z-20">
@@ -169,7 +177,7 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
       )}
 
       {player.bet > 0 && (
-        <div className={`absolute ${badgeAbove ? 'bottom-[135px]' : 'top-[135px]'} flex items-center gap-1.5 bg-slate-950/80 border border-emerald-500/30 rounded-full px-3 py-1 shadow-sm backdrop-blur-md whitespace-nowrap z-30 transform hover:scale-110 transition-transform`}>
+        <div key={`bet-${player.bet}`} className={`animate-chip-bet absolute ${badgeAbove ? 'bottom-[135px]' : 'top-[135px]'} flex items-center gap-1.5 bg-slate-950/80 border border-emerald-500/30 rounded-full px-3 py-1 shadow-sm backdrop-blur-md whitespace-nowrap z-30 transform hover:scale-110 transition-transform`}>
           <span className="text-emerald-500 text-sm">🪙</span>
           <span className="text-emerald-100 font-mono text-xs font-bold">{player.bet}</span>
         </div>
