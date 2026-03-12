@@ -257,6 +257,23 @@ export function createGame(config: GameConfig): GameState {
   }
 }
 
+export function getCurrentBlinds(config: GameConfig, handNumber: number): { smallBlind: number; bigBlind: number } {
+  const blindSchedule = config.blindSchedule
+
+  if (!blindSchedule || blindSchedule.length === 0) {
+    return {
+      smallBlind: config.smallBlind,
+      bigBlind: config.bigBlind,
+    }
+  }
+
+  const interval = config.blindIncreaseInterval ?? 10
+  const levelIndex = Math.floor((handNumber - 1) / interval)
+  const cappedLevelIndex = Math.min(levelIndex, blindSchedule.length - 1)
+
+  return blindSchedule[cappedLevelIndex]
+}
+
 export function resetGame(game: GameState): GameState {
   const resetPlayers = getSeatedPlayers(game.players).map(player => ({
     ...player,
@@ -324,6 +341,12 @@ export function startHand(game: GameState): GameState {
   }
 
   const dealerIndex = advanceDealer(game)
+  const blinds = getCurrentBlinds(game.config, game.handNumber + 1)
+  const handConfig: GameConfig = {
+    ...game.config,
+    smallBlind: blinds.smallBlind,
+    bigBlind: blinds.bigBlind,
+  }
   let deck = shuffleDeck(createDeck())
 
   // Reset per-hand fields for all seated players
@@ -354,6 +377,7 @@ export function startHand(game: GameState): GameState {
 
   const baseGame: GameState = {
     ...game,
+    config: handConfig,
     handNumber: game.handNumber + 1,
     phase: GamePhase.Preflop,
     players: dealtPlayers,
@@ -363,10 +387,10 @@ export function startHand(game: GameState): GameState {
     dealerIndex,
     activePlayerIndex: -1,
     currentBet: 0,
-    minRaise: game.config.bigBlind,
+    minRaise: handConfig.bigBlind,
     deck,
     shownCards: {},
-    lastRaiseAmount: game.config.bigBlind,
+    lastRaiseAmount: handConfig.bigBlind,
     playersToAct: [],
     timerStart: null,
     actionTimerStart: null,

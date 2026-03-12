@@ -112,6 +112,8 @@ export interface PlayerState {
 export interface GameConfig {
   smallBlind: number
   bigBlind: number
+  blindSchedule?: { smallBlind: number; bigBlind: number }[]
+  blindIncreaseInterval?: number
   startingStack: number
   timePerAction: number            // seconds per action; 0 = no limit
   betweenHandsDelay: number

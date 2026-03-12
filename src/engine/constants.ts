@@ -17,6 +17,8 @@ import { GameConfig } from './types'
 export const DEFAULT_CONFIG: GameConfig = {
   smallBlind: 1,
   bigBlind: 2,
+  blindSchedule: undefined,
+  blindIncreaseInterval: undefined,
   startingStack: 1000,
   timePerAction: 30,
   betweenHandsDelay: 3,
@@ -27,6 +29,7 @@ export const CONFIG_LIMITS = {
   smallBlind: { min: 1, max: 10000 },
   bigBlind: { min: 2, max: 20000 },
   startingStack: { min: 10, max: 1000000 },
+  blindIncreaseInterval: { min: 1, max: 100 },
   timePerAction: { min: 0, max: 300 },
   betweenHandsDelay: { min: 2, max: 15 },
   maxPlayers: { min: 2, max: 9 },
