@@ -26,6 +26,8 @@ import PokerTable from "@/components/PokerTable";
 import { SessionLedger } from "@/components/SessionLedger";
 import { InviteShare } from "@/components/InviteShare";
 import { HandHistory } from "@/components/HandHistory";
+import { ChatPanel } from "@/components/ChatPanel";
+import type { ChatMessage } from "@/lib/useGameSocket";
 import { useGameSocket } from "@/lib/useGameSocket";
 import { PlayerAction, GamePhase, ActionType } from "@/engine/types";
 import Link from "next/link";
@@ -82,6 +84,7 @@ export default function GamePage() {
   // Queued join payloads — held until the socket is ready, then sent in a useEffect
   const [pendingTokenJoin, setPendingTokenJoin] = useState<string | null>(null);
   const [pendingSeatJoin, setPendingSeatJoin] = useState<PendingSeatJoin | null>(null);
+  const [pendingSpectatorJoin, setPendingSpectatorJoin] = useState<string | null>(null);
 
   const [showLedger, setShowLedger] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
@@ -99,7 +102,45 @@ export default function GamePage() {
     | null
   >(null);
 
-  const { gameState, playerId, isConnected, lastError, lastHandResult, emit } = useGameSocket(gameId);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const onChatMessage = useCallback((msg: ChatMessage) => {
+    setChatMessages((prev) => {
+      // Prevent duplicates by ID (if same message arrives twice)
+      if (prev.some((m) => m.id === msg.id)) return prev;
+      return [...prev, msg];
+    });
+    setIsChatOpen((prevIsOpen) => {
+      if (!prevIsOpen) {
+        setUnreadCount((prevCount) => prevCount + 1);
+      }
+      return prevIsOpen;
+    });
+  }, []);
+
+  const { gameState, playerId, spectatorId, isConnected, lastError, lastHandResult, emit } = useGameSocket(gameId, { onChatMessage });
+
+  const handleSendChatMessage = useCallback((text: string, type: 'custom' | 'reaction') => {
+    if (!playerId && !spectatorId) return;
+    const senderId = playerId ?? spectatorId ?? '';
+    let senderName = displayName || 'Unknown';
+    if (gameState) {
+      const player = gameState.players.find(p => p?.id === senderId);
+      if (player) senderName = player.displayName;
+    }
+    emit('chat-message', { gameId, senderId, senderName, text, type });
+  }, [emit, gameId, playerId, spectatorId, gameState, displayName]);
+
+  const handleToggleChat = useCallback(() => {
+    setIsChatOpen(prev => {
+      if (!prev) setUnreadCount(0);
+      return !prev;
+    });
+  }, []);
+
+  const isSpectator = !!spectatorId;
 
   const [muckedHandNumber, setMuckedHandNumber] = useState<number | null>(null);
   const [actionConfirmation, setActionConfirmation] = useState<ActionConfirmation | null>(null);
@@ -231,6 +272,9 @@ export default function GamePage() {
     if (playerId && gameState) {
       return;
     }
+    if (spectatorId && gameState && !pendingSeatJoin) {
+      return;
+    }
 
     if (pendingTokenJoin) {
       emit("join-game", { gameId, token: pendingTokenJoin });
@@ -243,17 +287,25 @@ export default function GamePage() {
         seatIndex: pendingSeatJoin.seatIndex,
       });
     }
-  }, [isConnected, gameId, emit, pendingSeatJoin, pendingTokenJoin, playerId]);
 
-  // Once the server confirms the join (gameState + playerId populated), clean up join UI state.
+    if (pendingSpectatorJoin) {
+      emit("join-game", {
+        gameId,
+        displayName: pendingSpectatorJoin,
+        spectator: true,
+      });
+    }
+  }, [isConnected, gameId, emit, pendingSeatJoin, pendingSpectatorJoin, pendingTokenJoin, playerId, spectatorId]);
+
   useEffect(() => {
-    if (gameState && playerId) {
+    if (gameState && (playerId || spectatorId) && isJoining) {
       setShowJoinModal(false);
       setIsJoining(false);
       setPendingSeatJoin(null);
+      setPendingSpectatorJoin(null);
       setPendingTokenJoin(null);
     }
-  }, [gameState, playerId]);
+  }, [gameState, playerId, spectatorId, isJoining]);
 
   /**
    * Sends a player action (fold, check, call, raise) to the server via Socket.IO.
@@ -350,6 +402,13 @@ export default function GamePage() {
       displayName: displayName.trim(),
       seatIndex: selectedSeat,
     });
+  };
+
+  const handleWatchSubmit = () => {
+    if (!displayName.trim()) return;
+
+    setIsJoining(true);
+    setPendingSpectatorJoin(displayName.trim());
   };
 
   /** Emits `start-game` — only the host should have access to this button (enforced in UI). */
@@ -481,13 +540,23 @@ export default function GamePage() {
               </div>
             </div>
 
-            <button
-              type="submit"
-              disabled={isJoining || !displayName.trim() || selectedSeat === null}
-              className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-800 disabled:text-gray-500 text-white font-medium rounded-md transition-colors shadow-[0_0_20px_rgba(79,70,229,0.3)] disabled:shadow-none mt-2"
-            >
-              {isJoining ? "Joining..." : "Join Game"}
-            </button>
+            <div className="flex gap-3 mt-2">
+              <button
+                type="submit"
+                disabled={isJoining || !displayName.trim() || selectedSeat === null}
+                className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-800 disabled:text-gray-500 text-white font-medium rounded-md transition-colors shadow-[0_0_20px_rgba(79,70,229,0.3)] disabled:shadow-none"
+              >
+                {isJoining ? "Joining..." : "Join Game"}
+              </button>
+              <button
+                type="button"
+                onClick={handleWatchSubmit}
+                disabled={isJoining || !displayName.trim()}
+                className="flex-1 py-3 px-4 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-900 disabled:text-gray-600 text-gray-300 font-medium rounded-md transition-colors border border-gray-700"
+              >
+                Watch
+              </button>
+            </div>
           </form>
         </div>
       </div>
@@ -510,14 +579,33 @@ export default function GamePage() {
               Waiting for host...
             </span>
           )}
+          {isSpectator && (
+            <span className="px-3 py-1 bg-blue-900/30 text-blue-400 border border-blue-700/50 rounded-full text-xs font-medium">
+              Watching
+            </span>
+          )}
         </div>
 
         <div className="flex items-center space-x-6">
-          <div className="text-sm text-gray-400">
-            Players: <span className="text-white font-medium">{gameState?.players.filter(Boolean).length || gameInfo?.playerCount || 0}/{gameInfo?.maxPlayers || 0}</span>
+          <div className="text-sm text-gray-400 flex items-center">
+            <span>Players: <span className="text-white font-medium">{gameState?.players.filter(Boolean).length || gameInfo?.playerCount || 0}/{gameInfo?.maxPlayers || 0}</span></span>
+            {(gameState?.spectators?.length ?? 0) > 0 && (
+              <>
+                <span className="mx-2 text-gray-600">|</span>
+                <span>Watching: <span className="text-white font-medium">{gameState?.spectators.length}</span></span>
+              </>
+            )}
           </div>
 
           <div className="flex items-center space-x-3">
+            {isSpectator && (
+              <button
+                onClick={() => setShowJoinModal(true)}
+                className="px-4 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 text-sm font-medium rounded border border-indigo-500/30 transition-colors"
+              >
+                Join Game
+              </button>
+            )}
             <button
               onClick={() => setShowInvite(true)}
               className="px-4 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 text-sm font-medium rounded border border-indigo-500/30 transition-colors"
@@ -614,10 +702,10 @@ export default function GamePage() {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(31,41,55,0.4)_0,rgba(3,7,18,1)_100%)] pointer-events-none"></div>
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[400px] bg-indigo-900/10 blur-[120px] rounded-full pointer-events-none"></div>
         
-        {gameState && playerId ? (
+        {gameState && (playerId || spectatorId) ? (
           <div className="w-full h-full p-4 relative z-10">
-            <PokerTable gameState={gameState} playerId={playerId} onAction={handleAction} actionConfirmation={actionConfirmation} />
-            {(() => {
+            <PokerTable gameState={gameState} playerId={playerId ?? ""} onAction={handleAction} actionConfirmation={actionConfirmation} />
+            {playerId && (() => {
               const activePlayers = gameState.players.filter(p => p && !p.isFolded);
               const isUncontestedWin = gameState.phase === GamePhase.Showdown && activePlayers.length === 1;
               const isWinner = isUncontestedWin && activePlayers[0]?.id === playerId;

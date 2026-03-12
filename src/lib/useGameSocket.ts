@@ -57,6 +57,7 @@ type UseGameSocketOptions = {
 export function useGameSocket(gameId: string, options: UseGameSocketOptions = {}): {
   gameState: ClientGameState | null
   playerId: string | null
+  spectatorId: string | null
   isConnected: boolean
   lastError: string | null
   lastHandResult: HandResultEvent | null
@@ -65,6 +66,7 @@ export function useGameSocket(gameId: string, options: UseGameSocketOptions = {}
 } {
   const [gameState, setGameState] = useState<ClientGameState | null>(null)
   const [playerId, setPlayerId] = useState<string | null>(null)
+  const [spectatorId, setSpectatorId] = useState<string | null>(null)
   const [isConnected, setIsConnected] = useState<boolean>(socket.connected)
   const [lastError, setLastError] = useState<string | null>(null)
   const [lastHandResult, setLastHandResult] = useState<HandResultEvent | null>(null)
@@ -118,12 +120,18 @@ export function useGameSocket(gameId: string, options: UseGameSocketOptions = {}
      * - Only updates the stored token if the server returns one (new joins return a token;
      *   reconnects do not — the existing token remains valid).
      */
-    const onJoined = (data: { playerId: string; token?: string }) => {
+    const onJoined = (data: { playerId?: string; spectatorId?: string; token?: string }) => {
       setLastError(null)
-      localStorage.setItem(playerKey, data.playerId)
-      setPlayerId(data.playerId)
-      if (data.token) {
-        localStorage.setItem(`poker_token_${gameId}`, data.token)
+      if (data.playerId) {
+        localStorage.setItem(playerKey, data.playerId)
+        setPlayerId(data.playerId)
+        setSpectatorId(null)
+        if (data.token) {
+          localStorage.setItem(`poker_token_${gameId}`, data.token)
+        }
+      } else if (data.spectatorId) {
+        setSpectatorId(data.spectatorId)
+        setPlayerId(null)
       }
     }
 
@@ -181,6 +189,7 @@ export function useGameSocket(gameId: string, options: UseGameSocketOptions = {}
   return {
     gameState,
     playerId,
+    spectatorId,
     isConnected,
     lastError,
     lastHandResult,
