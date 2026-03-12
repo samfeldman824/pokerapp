@@ -606,6 +606,10 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
           throw new Error('Seat index is required')
         }
 
+        if (game.phase !== GamePhase.Waiting) {
+          throw new Error('Cannot join a game that is already in progress')
+        }
+
         const { game: gameWithPlayer, playerId } = addPlayer(game, payload.displayName, payload.seatIndex)
         // The first player to join becomes the host
         const updatedGame = game.hostPlayerId
