@@ -11,7 +11,7 @@ import {
   removePlayer,
   shouldAutoFoldDisconnected,
 } from './playerManager'
-import { GameConfig, GameState } from './types'
+import { GameConfig, GameState, Rank, Suit } from './types'
 
 function makeLobby(configOverrides: Partial<GameConfig> = {}): GameState {
   return createGame({ ...DEFAULT_CONFIG, ...configOverrides })
@@ -88,6 +88,66 @@ describe('playerManager', () => {
     const rebought = rebuyPlayer(busted, added.playerId)
     const player = rebought.players.find(p => p.id === added.playerId)
     expect(player?.chips).toBe(500)
+  })
+
+  it('rebuyPlayer() throws when player is short-stacked but actively in a hand (has holeCards)', () => {
+    let game = makeLobby({ startingStack: 500 })
+    const added = addPlayer(game, 'A', 0)
+    game = added.game
+
+    const inHand: GameState = {
+      ...game,
+      players: game.players.map(p =>
+        p.id === added.playerId
+          ? {
+              ...p,
+              chips: 100,
+              holeCards: [
+                { rank: Rank.Ace, suit: Suit.Spades },
+                { rank: Rank.King, suit: Suit.Clubs },
+              ],
+            }
+          : p
+      ),
+    }
+
+    expect(() => rebuyPlayer(inHand, added.playerId)).toThrow(/cannot rebuy during an active hand/i)
+  })
+
+  it('rebuyPlayer() throws when player has totalBetThisHand > 0 (mid-hand)', () => {
+    let game = makeLobby({ startingStack: 500 })
+    const added = addPlayer(game, 'A', 0)
+    game = added.game
+
+    const midHand: GameState = {
+      ...game,
+      players: game.players.map(p =>
+        p.id === added.playerId ? { ...p, chips: 200, totalBetThisHand: 50 } : p
+      ),
+    }
+
+    expect(() => rebuyPlayer(midHand, added.playerId)).toThrow(/cannot rebuy during an active hand/i)
+  })
+
+  it('rebuyPlayer() throws when player chips equals startingStack (exactly at stack)', () => {
+    let game = makeLobby({ startingStack: 500 })
+    const added = addPlayer(game, 'A', 0)
+    game = added.game
+
+    expect(() => rebuyPlayer(game, added.playerId)).toThrow(/already at or above starting stack/i)
+  })
+
+  it('rebuyPlayer() throws when player chips exceed startingStack', () => {
+    let game = makeLobby({ startingStack: 500 })
+    const added = addPlayer(game, 'A', 0)
+    game = added.game
+
+    const overStack: GameState = {
+      ...game,
+      players: game.players.map(p => (p.id === added.playerId ? { ...p, chips: 600 } : p)),
+    }
+
+    expect(() => rebuyPlayer(overStack, added.playerId)).toThrow(/already at or above starting stack/i)
   })
 
   it('shouldAutoFoldDisconnected() returns false when connected, false before timeout, true after timeout', () => {

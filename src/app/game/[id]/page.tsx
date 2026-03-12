@@ -569,9 +569,10 @@ export default function GamePage() {
 
   let currentBlindsInfo = null;
   if (gameState?.config.blindSchedule && gameState.config.blindSchedule.length > 0 && gameState.config.blindIncreaseInterval) {
-    const { smallBlind, bigBlind } = getCurrentBlinds(gameState.config, gameState.handNumber);
+    const displayHandNumber = Math.max(1, gameState.handNumber);
+    const { smallBlind, bigBlind } = getCurrentBlinds(gameState.config, displayHandNumber);
     const interval = gameState.config.blindIncreaseInterval;
-    const handsUntilIncrease = interval - ((gameState.handNumber - 1) % interval);
+    const handsUntilIncrease = interval - ((displayHandNumber - 1) % interval);
     currentBlindsInfo = { smallBlind, bigBlind, handsUntilIncrease };
   }
 
