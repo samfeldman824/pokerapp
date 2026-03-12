@@ -123,6 +123,7 @@ export interface GameState {
   config: GameConfig
   phase: GamePhase
   players: PlayerState[]           // compact sorted array (canonical form); sparse when passed into betting.ts
+  spectators: Array<{ id: string; displayName: string }>
   communityCards: Card[]           // 0–5 cards revealed so far
   pot: number                      // chips collected from previous streets (current street bets live on PlayerState.bet)
   sidePots: SidePot[]

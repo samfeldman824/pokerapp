@@ -28,7 +28,7 @@ import { games, handActions, handResults, hands, players } from './schema'
 export async function saveGame(game: GameState): Promise<void> {
   const createdAt = new Date()
   const status = game.isPaused ? 'paused' : 'active'
-  const { deck: _deck, ...gameSnapshot } = game
+  const { deck: _deck, spectators: _spectators, ...gameSnapshot } = game
 
   await db
     .insert(games)
@@ -88,6 +88,7 @@ export async function loadPersistedGame(gameId: string): Promise<GameState | nul
     return {
       ...snapshot,
       config,
+      spectators: [],
       shownCards: snapshot.shownCards ?? {},
       deck: [],
     }
@@ -131,6 +132,7 @@ export async function loadPersistedGame(gameId: string): Promise<GameState | nul
     config,
     phase: GamePhase.Waiting,
     players: persistedPlayers,
+    spectators: [],
     communityCards: [],
     pot: 0,
     sidePots: [],

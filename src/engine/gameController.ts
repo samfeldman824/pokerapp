@@ -237,6 +237,7 @@ export function createGame(config: GameConfig): GameState {
     config,
     phase: GamePhase.Waiting,
     players: [],
+    spectators: [],
     communityCards: [],
     pot: 0,
     sidePots: [],

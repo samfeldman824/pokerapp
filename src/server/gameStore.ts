@@ -18,7 +18,9 @@ import { loadPersistedGame } from '../db/persistence'
 /** Associates a socket connection with its game and player. */
 type SocketGameInfo = {
   gameId: string
-  playerId: string
+  playerId?: string
+  spectatorId?: string
+  isSpectator: boolean
 }
 
 /**
@@ -121,9 +123,8 @@ export async function getOrLoadGame(gameId: string): Promise<GameState | undefin
 /** Maps socket ID → game/player association for the lifetime of the connection. */
 const socketToGame: Map<string, SocketGameInfo> = new Map()
 
-/** Records which game and player a socket is associated with on join/reconnect. */
-export function registerSocket(socketId: string, gameId: string, playerId: string): void {
-  socketToGame.set(socketId, { gameId, playerId })
+export function registerSocket(socketId: string, socketInfo: SocketGameInfo): void {
+  socketToGame.set(socketId, socketInfo)
 }
 
 /**
