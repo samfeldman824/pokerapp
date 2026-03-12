@@ -65,12 +65,20 @@ describe('playerManager', () => {
     expect(recPlayer?.disconnectTime).toBeNull()
   })
 
-  it('rebuyPlayer() throws if player has chips > 0; resets chips to startingStack when busted', () => {
+  it('rebuyPlayer() throws if player is at or above startingStack; tops up short-stacked or busted player', () => {
     let game = makeLobby({ startingStack: 500 })
     const added = addPlayer(game, 'A', 0)
     game = added.game
 
-    expect(() => rebuyPlayer(game, added.playerId)).toThrow(/rebuy only allowed/i)
+    expect(() => rebuyPlayer(game, added.playerId)).toThrow(/already at or above starting stack/i)
+
+    const shortStacked: GameState = {
+      ...game,
+      players: game.players.map(p => (p.id === added.playerId ? { ...p, chips: 200 } : p)),
+    }
+
+    const toppedUp = rebuyPlayer(shortStacked, added.playerId)
+    expect(toppedUp.players.find(p => p.id === added.playerId)?.chips).toBe(500)
 
     const busted: GameState = {
       ...game,

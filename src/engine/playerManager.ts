@@ -170,17 +170,15 @@ export function shouldAutoFoldDisconnected(
 
 /**
  * Rebuys a player — resets their chips to the starting stack.
- * Only valid when player has 0 chips.
+ * Valid when player is short-stacked (chips < startingStack), including busted (chips === 0).
  */
 export function rebuyPlayer(game: GameState, playerId: string): GameState {
   const player = findPlayerById(game, playerId)
   if (!player) {
     throw new Error(`Player ${playerId} not found`)
   }
-  if (player.chips !== 0) {
-    throw new Error(
-      `Player ${playerId} has ${player.chips} chips — rebuy only allowed when busted`
-    )
+  if (player.chips >= game.config.startingStack) {
+    throw new Error('Already at or above starting stack')
   }
 
   // Prevent rebuy while player is actively in a hand

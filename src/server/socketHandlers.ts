@@ -972,15 +972,15 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
           throw new Error('Player not found')
         }
 
-        if (game.phase !== GamePhase.Waiting && player.chips !== 0) {
-          throw new Error('Rebuy only allowed when busted')
+        if (player.chips >= game.config.startingStack) {
+          throw new Error('Already at or above starting stack')
         }
 
         if (game.phase !== GamePhase.Waiting && !isHandComplete(game)) {
           throw new Error('Rebuy only allowed between hands')
         }
 
-        const nextGame = player.chips === 0 ? rebuyPlayer(game, payload.playerId) : game
+        const nextGame = player.chips < game.config.startingStack ? rebuyPlayer(game, payload.playerId) : game
         gameStore.set(nextGame.id, nextGame)
         await saveGame(nextGame)
         await broadcastGameState(io, nextGame)
