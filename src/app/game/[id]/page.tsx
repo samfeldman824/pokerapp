@@ -29,20 +29,15 @@ import { HandHistory } from "@/components/HandHistory";
 import { ChatPanel } from "@/components/ChatPanel";
 import type { ChatMessage } from "@/lib/useGameSocket";
 import { useGameSocket } from "@/lib/useGameSocket";
-import { PlayerAction, GamePhase, ActionType } from "@/engine/types";
+import { PlayerAction, GamePhase, ActionType, GameConfig } from "@/engine/types";
+import { getCurrentBlinds } from "@/engine/gameController";
 import Link from "next/link";
 import { ShowMuckActionBar } from "@/components/ShowMuckActionBar";
 
 /** Shape of the REST game snapshot fetched on mount. */
 interface GameInfo {
   id: string;
-  config: {
-    maxPlayers: number;
-    smallBlind: number;
-    bigBlind: number;
-    startingStack: number;
-    betweenHandsDelay: number;
-  };
+  config: GameConfig;
   phase: string;
   playerCount: number;
   maxPlayers: number;
@@ -572,6 +567,14 @@ export default function GamePage() {
   const isHost = gameState && playerId === gameState.hostPlayerId;
   const betweenHandsDelay = gameState?.config.betweenHandsDelay ?? gameInfo?.config.betweenHandsDelay;
 
+  let currentBlindsInfo = null;
+  if (gameState?.config.blindSchedule && gameState.config.blindSchedule.length > 0 && gameState.config.blindIncreaseInterval) {
+    const { smallBlind, bigBlind } = getCurrentBlinds(gameState.config, gameState.handNumber);
+    const interval = gameState.config.blindIncreaseInterval;
+    const handsUntilIncrease = interval - ((gameState.handNumber - 1) % interval);
+    currentBlindsInfo = { smallBlind, bigBlind, handsUntilIncrease };
+  }
+
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col font-sans text-gray-200 relative overflow-hidden">
       <header className="h-14 bg-gray-900 border-b border-gray-800 flex items-center justify-between px-6 z-10">
@@ -593,6 +596,15 @@ export default function GamePage() {
 
         <div className="flex items-center space-x-6">
           <div className="text-sm text-gray-400 flex items-center">
+            {currentBlindsInfo && (
+              <>
+                <span>
+                  Blinds: <span className="text-white font-medium">{currentBlindsInfo.smallBlind}/{currentBlindsInfo.bigBlind}</span>
+                  <span className="ml-1 text-xs text-gray-500">· Next increase in {currentBlindsInfo.handsUntilIncrease} hand{currentBlindsInfo.handsUntilIncrease !== 1 && 's'}</span>
+                </span>
+                <span className="mx-2 text-gray-600">|</span>
+              </>
+            )}
             <span>Players: <span className="text-white font-medium">{gameState?.players.filter(Boolean).length || gameInfo?.playerCount || 0}/{gameInfo?.maxPlayers || 0}</span></span>
             {(gameState?.spectators?.length ?? 0) > 0 && (
               <>

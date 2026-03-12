@@ -28,8 +28,43 @@ interface FormErrors {
   timePerAction?: string;
   betweenHandsDelay?: string;
   maxPlayers?: string;
+  blindIncreaseInterval?: string;
   general?: string;
 }
+
+const BLIND_PRESETS = {
+  turbo: {
+    interval: 5,
+    schedule: [
+      { smallBlind: 1, bigBlind: 2 },
+      { smallBlind: 2, bigBlind: 4 },
+      { smallBlind: 3, bigBlind: 6 },
+      { smallBlind: 5, bigBlind: 10 },
+      { smallBlind: 10, bigBlind: 20 },
+      { smallBlind: 25, bigBlind: 50 },
+    ],
+  },
+  normal: {
+    interval: 10,
+    schedule: [
+      { smallBlind: 1, bigBlind: 2 },
+      { smallBlind: 2, bigBlind: 4 },
+      { smallBlind: 5, bigBlind: 10 },
+      { smallBlind: 10, bigBlind: 20 },
+      { smallBlind: 25, bigBlind: 50 },
+      { smallBlind: 50, bigBlind: 100 },
+    ],
+  },
+  slow: {
+    interval: 20,
+    schedule: [
+      { smallBlind: 1, bigBlind: 2 },
+      { smallBlind: 2, bigBlind: 4 },
+      { smallBlind: 5, bigBlind: 10 },
+      { smallBlind: 10, bigBlind: 20 },
+    ],
+  },
+};
 
 export default function CreateGamePage() {
   const router = useRouter();
@@ -45,6 +80,9 @@ export default function CreateGamePage() {
     timePerAction: 30,
     betweenHandsDelay: 3,
     maxPlayers: 9,
+    enableBlindSchedule: false,
+    blindSchedulePreset: "normal" as "turbo" | "normal" | "slow",
+    blindIncreaseInterval: 10,
   });
 
   /**
@@ -52,7 +90,7 @@ export default function CreateGamePage() {
    * Coerces number inputs to `number` type (HTML inputs always yield strings).
    * Also clears the specific field's error as the user types, preventing stale error messages.
    */
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
     setFormData((prev) => ({
       ...prev,
@@ -62,6 +100,23 @@ export default function CreateGamePage() {
     if (errors[name as keyof FormErrors]) {
       setErrors((prev) => ({ ...prev, [name]: undefined, general: undefined }));
     }
+  };
+
+  const handleCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, checked } = e.target;
+    setFormData((prev) => ({
+      ...prev,
+      [name]: checked,
+    }));
+  };
+
+  const handlePresetChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const preset = e.target.value as "turbo" | "normal" | "slow";
+    setFormData((prev) => ({
+      ...prev,
+      blindSchedulePreset: preset,
+      blindIncreaseInterval: BLIND_PRESETS[preset].interval,
+    }));
   };
 
   /**
@@ -121,6 +176,12 @@ export default function CreateGamePage() {
       newErrors.maxPlayers = "Max players must be between 2 and 9.";
     }
 
+    if (formData.enableBlindSchedule) {
+      if (formData.blindIncreaseInterval < 1 || formData.blindIncreaseInterval > 100) {
+        newErrors.blindIncreaseInterval = "Must be between 1 and 100 hands.";
+      }
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -144,10 +205,21 @@ export default function CreateGamePage() {
     setErrors({});
 
     try {
+      const payload: any = { ...formData };
+      if (formData.enableBlindSchedule) {
+        payload.blindSchedule = BLIND_PRESETS[formData.blindSchedulePreset].schedule;
+        payload.blindIncreaseInterval = formData.blindIncreaseInterval;
+      } else {
+        delete payload.blindSchedule;
+        delete payload.blindIncreaseInterval;
+      }
+      delete payload.enableBlindSchedule;
+      delete payload.blindSchedulePreset;
+
       const res = await fetch("/api/games", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
@@ -343,6 +415,60 @@ export default function CreateGamePage() {
                     <span>15s</span>
                   </div>
                   {errors.betweenHandsDelay && <p className="mt-1.5 text-xs text-red-500 font-medium">{errors.betweenHandsDelay}</p>}
+                </div>
+
+                <div className="md:col-span-2 pt-2 border-t border-zinc-800/50">
+                  <div className="flex items-center justify-between mb-4">
+                    <label className="block text-sm font-medium text-zinc-400">Enable Blind Increases</label>
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        name="enableBlindSchedule"
+                        checked={formData.enableBlindSchedule}
+                        onChange={handleCheckboxChange}
+                        className="w-4 h-4 accent-amber-500 cursor-pointer"
+                      />
+                      <span className="text-sm text-zinc-400">Blinds increase over time</span>
+                    </label>
+                  </div>
+
+                  {formData.enableBlindSchedule && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-zinc-950/30 p-4 border border-zinc-800/50 mt-4">
+                      <div>
+                        <label htmlFor="blindSchedulePreset" className="block text-sm font-medium text-zinc-400 mb-2">
+                          Schedule Preset
+                        </label>
+                        <select
+                          id="blindSchedulePreset"
+                          name="blindSchedulePreset"
+                          value={formData.blindSchedulePreset}
+                          onChange={handlePresetChange}
+                          className="w-full bg-zinc-950/50 border border-zinc-800 focus:border-amber-500/50 px-4 py-3 text-white outline-none transition-colors appearance-none cursor-pointer"
+                        >
+                          <option value="turbo">Turbo (Fast jumps)</option>
+                          <option value="normal">Normal (Standard jumps)</option>
+                          <option value="slow">Slow (Gradual jumps)</option>
+                        </select>
+                      </div>
+                      
+                      <div>
+                        <label htmlFor="blindIncreaseInterval" className="block text-sm font-medium text-zinc-400 mb-2">
+                          Increase Every N Hands
+                        </label>
+                        <input
+                          type="number"
+                          id="blindIncreaseInterval"
+                          name="blindIncreaseInterval"
+                          value={formData.blindIncreaseInterval}
+                          onChange={handleChange}
+                          min={1}
+                          max={100}
+                          className={`w-full bg-zinc-950/50 border ${errors.blindIncreaseInterval ? 'border-red-500/50 focus:border-red-500' : 'border-zinc-800 focus:border-amber-500/50'} px-4 py-3 text-white outline-none transition-colors`}
+                        />
+                        {errors.blindIncreaseInterval && <p className="mt-1.5 text-xs text-red-500 font-medium">{errors.blindIncreaseInterval}</p>}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

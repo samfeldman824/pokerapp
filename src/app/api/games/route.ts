@@ -48,7 +48,9 @@ export async function POST(req: NextRequest) {
       betweenHandsDelay,
       maxPlayers, 
       hostDisplayName, 
-      hostSeatIndex 
+      hostSeatIndex,
+      blindSchedule,
+      blindIncreaseInterval
     } = body;
 
     // --- Input validation ---
@@ -78,6 +80,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid hostSeatIndex' }, { status: 400 });
     }
 
+    if (blindSchedule !== undefined) {
+      if (!Array.isArray(blindSchedule) || blindSchedule.length === 0) {
+        return NextResponse.json({ error: 'blindSchedule must be a non-empty array' }, { status: 400 });
+      }
+      if (typeof blindIncreaseInterval !== 'number' || blindIncreaseInterval < 1 || blindIncreaseInterval > 100) {
+        return NextResponse.json({ error: 'blindIncreaseInterval must be between 1 and 100' }, { status: 400 });
+      }
+    }
+
     const config: GameConfig = {
       smallBlind,
       bigBlind,
@@ -85,6 +96,7 @@ export async function POST(req: NextRequest) {
       timePerAction,
       betweenHandsDelay,
       maxPlayers,
+      ...(blindSchedule && { blindSchedule, blindIncreaseInterval }),
     };
 
     // Build the initial game state (phase: "waiting", no hands dealt yet)
