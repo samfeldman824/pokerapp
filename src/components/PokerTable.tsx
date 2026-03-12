@@ -41,7 +41,7 @@ export function PokerTable({ gameState, playerId, onAction, actionConfirmation }
     return positions9[offset];
   };
 
-  const isTurn = gameState.activePlayerIndex === currentPlayerSeatIndex;
+  const isTurn = isPlaying && gameState.activePlayerIndex === currentPlayerSeatIndex;
   const showActionBar = isTurn || Boolean(actionConfirmation);
 
   const seatedPlayers = gameState.players.filter(Boolean);
