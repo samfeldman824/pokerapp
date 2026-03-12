@@ -37,7 +37,7 @@ async function watchGame(page: Page, gameId: string, name: string): Promise<void
   await expect(page.getByLabel('Display Name')).toBeVisible({ timeout: 10000 });
   await page.getByLabel('Display Name').fill(name);
   await page.getByRole('button', { name: /^watch$/i }).click();
-  const watchingBadge = page.locator('header').getByText('Watching');
+  const watchingBadge = page.locator('header').getByText('Watching', { exact: true });
   await expect(watchingBadge).toBeVisible({ timeout: 15000 });
 }
 
@@ -82,7 +82,7 @@ test('spectator: Watch button joins as spectator without seat', async ({ browser
     const gameId = await createGame(hostPage);
     await watchGame(spectatorPage, gameId, 'Watcher');
 
-    await expect(spectatorPage.getByText(/watching/i)).toBeVisible({ timeout: 5000 });
+    await expect(spectatorPage.locator('header').getByText('Watching', { exact: true })).toBeVisible({ timeout: 5000 });
 
     const foldButton = spectatorPage.locator('button:text("Fold")');
     const checkButton = spectatorPage.locator('button:text("Check")');
@@ -105,7 +105,7 @@ test('spectator: spectator sees table but no action buttons during an active gam
   try {
     await watchGame(spectatorPage, gameId, 'Watcher');
 
-    await expect(spectatorPage.getByText(/watching/i)).toBeVisible({ timeout: 5000 });
+    await expect(spectatorPage.locator('header').getByText('Watching', { exact: true })).toBeVisible({ timeout: 5000 });
 
     await expect(spectatorPage.locator('button:text("Fold")')).not.toBeVisible();
     await expect(spectatorPage.locator('button:text("Check")')).not.toBeVisible();
@@ -130,7 +130,7 @@ test('spectator: spectator count appears in header for all users', async ({ brow
     const gameId = await createGame(hostPage);
     await watchGame(spectatorPage, gameId, 'Watcher');
 
-    await expect(hostPage.getByText(/watching/i)).toBeVisible({ timeout: 5000 });
+    await expect(hostPage.locator('header').getByText(/watching:/i)).toBeVisible({ timeout: 5000 });
   } finally {
     await ctx1.close();
     await ctxSpectator.close();
@@ -181,7 +181,7 @@ test('chat: player 2 sends a reaction and player 1 sees it', async ({ browser })
     await expect(chatToggleHost).toBeVisible({ timeout: 5000 });
     await chatToggleHost.click();
 
-    await expect(hostPage.getByText('GG')).toBeVisible({ timeout: 5000 });
+    await expect(hostPage.locator('.overflow-y-auto').getByText('GG', { exact: true })).toBeVisible({ timeout: 5000 });
   } finally {
     await ctx1.close();
     await ctx2.close();
@@ -246,7 +246,7 @@ test('chat: two-way message exchange between two players', async ({ browser }) =
     await expect(ggButton).toBeVisible({ timeout: 3000 });
     await ggButton.click();
 
-    await expect(hostPage.getByText('GG')).toBeVisible({ timeout: 5000 });
+    await expect(hostPage.locator('.overflow-y-auto').getByText('GG', { exact: true })).toBeVisible({ timeout: 5000 });
   } finally {
     await ctx1.close();
     await ctx2.close();

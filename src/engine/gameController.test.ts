@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_CONFIG } from './constants'
-import { advanceDealer, createGame, getPlayerView, getShowdownResults, handleAction, isHandComplete, resetGame, startHand } from './gameController'
+import { advanceDealer, createGame, getCurrentBlinds, getPlayerView, getShowdownResults, handleAction, isHandComplete, resetGame, startHand } from './gameController'
 import { makeGame } from './testUtils'
 import { ActionType, GamePhase, GameState, Rank, Suit } from './types'
 
@@ -250,6 +250,79 @@ describe('gameController', () => {
     expect(p0ViewSelf?.holeCards).not.toBeNull()
     expect(p0ViewOther?.holeCards).not.toBeNull()
     expect(p0ViewOther?.holeCards).toEqual(p1.holeCards)
+  })
+
+  describe('getCurrentBlinds()', () => {
+    const blindSchedule = [
+      { smallBlind: 1, bigBlind: 2 },
+      { smallBlind: 2, bigBlind: 4 },
+      { smallBlind: 5, bigBlind: 10 },
+    ]
+
+    it('returns base config blinds when blindSchedule is undefined (backward compat)', () => {
+      const config = { ...DEFAULT_CONFIG, blindSchedule: undefined, blindIncreaseInterval: undefined }
+      expect(getCurrentBlinds(config, 1)).toEqual({ smallBlind: 1, bigBlind: 2 })
+      expect(getCurrentBlinds(config, 99)).toEqual({ smallBlind: 1, bigBlind: 2 })
+    })
+
+    it('returns base config blinds when blindSchedule is empty array', () => {
+      const config = { ...DEFAULT_CONFIG, blindSchedule: [], blindIncreaseInterval: 5 }
+      expect(getCurrentBlinds(config, 1)).toEqual({ smallBlind: 1, bigBlind: 2 })
+    })
+
+    it('returns the correct level based on handNumber and interval', () => {
+      const config = { ...DEFAULT_CONFIG, blindSchedule, blindIncreaseInterval: 5 }
+      // hands 1-5 → level 0
+      expect(getCurrentBlinds(config, 1)).toEqual({ smallBlind: 1, bigBlind: 2 })
+      expect(getCurrentBlinds(config, 5)).toEqual({ smallBlind: 1, bigBlind: 2 })
+      // hands 6-10 → level 1
+      expect(getCurrentBlinds(config, 6)).toEqual({ smallBlind: 2, bigBlind: 4 })
+      expect(getCurrentBlinds(config, 10)).toEqual({ smallBlind: 2, bigBlind: 4 })
+      // hands 11-15 → level 2
+      expect(getCurrentBlinds(config, 11)).toEqual({ smallBlind: 5, bigBlind: 10 })
+    })
+
+    it('is capped at the last schedule level (does not go out of bounds)', () => {
+      const config = { ...DEFAULT_CONFIG, blindSchedule, blindIncreaseInterval: 5 }
+      // hand 20+ should still be the last level (index 2)
+      expect(getCurrentBlinds(config, 20)).toEqual({ smallBlind: 5, bigBlind: 10 })
+      expect(getCurrentBlinds(config, 999)).toEqual({ smallBlind: 5, bigBlind: 10 })
+    })
+
+    it('handles hand boundary at exactly the first hand of a new level', () => {
+      const config = { ...DEFAULT_CONFIG, blindSchedule, blindIncreaseInterval: 10 }
+      // hand 10 → level index = floor(9/10) = 0
+      expect(getCurrentBlinds(config, 10)).toEqual({ smallBlind: 1, bigBlind: 2 })
+      // hand 11 → level index = floor(10/10) = 1
+      expect(getCurrentBlinds(config, 11)).toEqual({ smallBlind: 2, bigBlind: 4 })
+    })
+  })
+
+  it('startHand() uses correct blinds at different hand numbers when blind schedule is configured', () => {
+    const blindSchedule = [
+      { smallBlind: 1, bigBlind: 2 },
+      { smallBlind: 5, bigBlind: 10 },
+    ]
+    // interval=5: hands 1-5 → level 0 (1/2), hands 6-10 → level 1 (5/10)
+    const game = makeGame({ config: { blindSchedule, blindIncreaseInterval: 5 } })
+
+    // First hand — handNumber starts at 0, startHand uses handNumber+1=1 → level 0
+    const hand1 = startHand(game)
+    expect(hand1.config.smallBlind).toBe(1)
+    expect(hand1.config.bigBlind).toBe(2)
+    expect(hand1.handNumber).toBe(1)
+
+    // Simulate 5 more hands to reach level 1 (hand 6)
+    let current: GameState = { ...hand1, phase: GamePhase.Showdown }
+    for (let i = 0; i < 4; i++) {
+      current = startHand(current)
+      current = { ...current, phase: GamePhase.Showdown }
+    }
+    // Now handNumber === 5, next startHand uses handNumber+1=6 → level 1
+    const hand6 = startHand(current)
+    expect(hand6.config.smallBlind).toBe(5)
+    expect(hand6.config.bigBlind).toBe(10)
+    expect(hand6.handNumber).toBe(6)
   })
 
   it('resetGame() keeps players but resets chips, phase, and hand state', () => {
