@@ -16,7 +16,7 @@
  *                             if the component re-mounts before receiving a `joined` event.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { ClientGameState, HandResult } from '@/engine/types'
 
@@ -27,6 +27,20 @@ export type HandResultEvent = {
   handNumber: number
   communityCards: ClientGameState['communityCards']
   results: HandResult[]
+}
+
+export type ChatMessage = {
+  id: string
+  gameId: string
+  senderId: string
+  senderName: string
+  text: string
+  type: 'custom' | 'reaction'
+  timestamp: number
+}
+
+type UseGameSocketOptions = {
+  onChatMessage?: (msg: ChatMessage) => void
 }
 
 /**
@@ -40,7 +54,7 @@ export type HandResultEvent = {
  *   - `emit`           Stable wrapper around `socket.emit` — safe to use in callbacks.
  *   - `registerPlayer` Manually set and persist a player ID (used after joining).
  */
-export function useGameSocket(gameId: string): {
+export function useGameSocket(gameId: string, options: UseGameSocketOptions = {}): {
   gameState: ClientGameState | null
   playerId: string | null
   isConnected: boolean
@@ -54,6 +68,11 @@ export function useGameSocket(gameId: string): {
   const [isConnected, setIsConnected] = useState<boolean>(socket.connected)
   const [lastError, setLastError] = useState<string | null>(null)
   const [lastHandResult, setLastHandResult] = useState<HandResultEvent | null>(null)
+  const onChatMessageRef = useRef<UseGameSocketOptions['onChatMessage']>(options.onChatMessage)
+
+  useEffect(() => {
+    onChatMessageRef.current = options.onChatMessage
+  }, [options.onChatMessage])
 
   const emit = useCallback((event: string, data: unknown) => {
     setLastError(null)
@@ -132,10 +151,16 @@ export function useGameSocket(gameId: string): {
       setLastHandResult(event)
     }
 
+    const onChatBroadcast = (event: ChatMessage) => {
+      if (event.gameId !== gameId) return
+      onChatMessageRef.current?.(event)
+    }
+
     socket.on('connect', onConnect)
     socket.on('disconnect', onDisconnect)
     socket.on('joined', onJoined)
     socket.on('game-state', onGameState)
+    socket.on('chat-broadcast', onChatBroadcast)
     socket.on('error', onError)
     socket.on('hand-result', onHandResult)
 
@@ -146,6 +171,7 @@ export function useGameSocket(gameId: string): {
       socket.off('disconnect', onDisconnect)
       socket.off('joined', onJoined)
       socket.off('game-state', onGameState)
+      socket.off('chat-broadcast', onChatBroadcast)
       socket.off('error', onError)
       socket.off('hand-result', onHandResult)
       socket.disconnect()

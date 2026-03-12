@@ -26,6 +26,7 @@
  */
 
 import { Server, Socket } from 'socket.io'
+import { randomUUID } from 'crypto'
 
 import {
   getPlayerView,
@@ -90,7 +91,13 @@ const disconnectTimers: Map<string, NodeJS.Timeout> = new Map()
 /** Per-game delay before automatically starting the next hand after showdown. */
 const nextHandTimers: Map<string, NodeJS.Timeout> = new Map()
 
+const chatRateLimits = new Map<string, { count: number; windowStart: number }>()
+
 const DISCONNECT_AUTO_FOLD_DELAY_MS = 30_000
+const CHAT_RATE_LIMIT_WINDOW_MS = 10_000
+const CHAT_RATE_LIMIT_MAX_MESSAGES = 5
+const CHAT_MAX_CUSTOM_MESSAGE_LENGTH = 200
+const CHAT_REACTIONS = ['Nice hand!', 'GG', 'Well played', 'LOL', 'Unlucky'] as const
 
 // ---------------------------------------------------------------------------
 // Types
@@ -102,7 +109,8 @@ type PlayerWithCards = PlayerState & { holeCards: [Card, Card] }
 type JoinGamePayload = {
   gameId: string
   displayName: string
-  seatIndex: number
+  seatIndex?: number
+  spectator?: boolean
   token?: string
 }
 
@@ -116,6 +124,14 @@ type PlayerActionPayload = GamePlayerPayload & {
 }
 
 type RebuyPayload = GamePlayerPayload
+
+type ChatMessagePayload = {
+  gameId: string
+  senderId: string
+  senderName: string
+  text: string
+  type: 'custom' | 'reaction'
+}
 
 /** Emitted to all clients in the room when a hand concludes. */
 type HandResultEvent = {
@@ -358,7 +374,9 @@ async function broadcastGameState(io: Server, game: GameState): Promise<void> {
     sockets.map(async (roomSocket) => {
       try {
         const socketInfo = getSocketInfo(roomSocket.id)
-        const playerId = socketInfo?.gameId === game.id ? socketInfo.playerId : ''
+        const playerId = socketInfo?.gameId === game.id && !socketInfo.isSpectator
+          ? (socketInfo.playerId ?? '')
+          : ''
         roomSocket.emit('game-state', getPlayerView(game, playerId))
       } catch {
         // Ignore errors from individual sockets (e.g., socket disconnected mid-broadcast)
@@ -543,6 +561,22 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
 
         await socket.join(payload.gameId)
 
+        if (payload.spectator) {
+          const spectatorId = randomUUID()
+          const updatedGame: GameState = {
+            ...game,
+            spectators: [...game.spectators, { id: spectatorId, displayName: payload.displayName }],
+          }
+
+          gameStore.set(updatedGame.id, updatedGame)
+          registerSocket(socket.id, { gameId: updatedGame.id, spectatorId, isSpectator: true })
+          await saveGame(updatedGame)
+          socket.emit('joined', { spectatorId })
+          socket.emit('game-state', getPlayerView(updatedGame, ''))
+          await broadcastGameState(io, updatedGame)
+          return
+        }
+
         if (payload.token) {
           const existingPlayer = findPlayerByToken(game, payload.token)
 
@@ -555,13 +589,21 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
             }
             const updatedGame = markPlayerReconnected(game, existingPlayer.id)
             gameStore.set(updatedGame.id, updatedGame)
-            registerSocket(socket.id, updatedGame.id, existingPlayer.id)
+            registerSocket(socket.id, {
+              gameId: updatedGame.id,
+              playerId: existingPlayer.id,
+              isSpectator: false,
+            })
             await saveGame(updatedGame)
             socket.emit('joined', { playerId: existingPlayer.id })
             socket.emit('game-state', getPlayerView(updatedGame, existingPlayer.id))
             await broadcastGameState(io, updatedGame)
             return
           }
+        }
+
+        if (payload.seatIndex === undefined) {
+          throw new Error('Seat index is required')
         }
 
         const { game: gameWithPlayer, playerId } = addPlayer(game, payload.displayName, payload.seatIndex)
@@ -574,7 +616,11 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
             }
 
         gameStore.set(updatedGame.id, updatedGame)
-        registerSocket(socket.id, updatedGame.id, playerId)
+        registerSocket(socket.id, {
+          gameId: updatedGame.id,
+          playerId,
+          isSpectator: false,
+        })
 
         const player = updatedGame.players.find((candidate) => candidate.id === playerId)
 
@@ -602,6 +648,11 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
 
         if (!game) {
           throw new Error('Game not found')
+        }
+
+        const socketInfo = getSocketInfo(socket.id)
+        if (socketInfo?.gameId === payload.gameId && socketInfo.isSpectator) {
+          throw new Error('Spectators cannot start games')
         }
 
         if (payload.playerId !== game.hostPlayerId) {
@@ -637,6 +688,11 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
 
         if (!game) {
           throw new Error('Game not found')
+        }
+
+        const socketInfo = getSocketInfo(socket.id)
+        if (socketInfo?.gameId === payload.gameId && socketInfo.isSpectator) {
+          throw new Error('Spectators cannot perform actions')
         }
 
         clearGameTimer(payload.gameId)
@@ -680,6 +736,70 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
         emitSocketError(socket, error)
       }
     })
+  })
+
+  socket.on('chat-message', (payload: ChatMessagePayload) => {
+    void (async () => {
+      try {
+        const game = await getOrLoadGame(payload.gameId)
+
+        if (!game) {
+          throw new Error('Game not found')
+        }
+
+        const normalizedText = payload.text.trim()
+        const normalizedSenderName = payload.senderName.trim()
+        const senderId = payload.senderId.trim()
+
+        if (!normalizedText) {
+          throw new Error('Message cannot be empty')
+        }
+
+        if (!senderId) {
+          throw new Error('Sender ID is required')
+        }
+
+        if (!normalizedSenderName) {
+          throw new Error('Sender name is required')
+        }
+
+        if (payload.type === 'custom') {
+          if (normalizedText.length > CHAT_MAX_CUSTOM_MESSAGE_LENGTH) {
+            throw new Error(`Custom messages cannot exceed ${CHAT_MAX_CUSTOM_MESSAGE_LENGTH} characters`)
+          }
+        } else if (!CHAT_REACTIONS.includes(normalizedText as (typeof CHAT_REACTIONS)[number])) {
+          throw new Error('Invalid reaction')
+        }
+
+        const now = Date.now()
+        const currentRateLimit = chatRateLimits.get(senderId)
+
+        if (!currentRateLimit || now - currentRateLimit.windowStart >= CHAT_RATE_LIMIT_WINDOW_MS) {
+          chatRateLimits.set(senderId, { count: 1, windowStart: now })
+        } else {
+          if (currentRateLimit.count >= CHAT_RATE_LIMIT_MAX_MESSAGES) {
+            throw new Error('Too many chat messages. Please wait a moment before sending more.')
+          }
+
+          chatRateLimits.set(senderId, {
+            count: currentRateLimit.count + 1,
+            windowStart: currentRateLimit.windowStart,
+          })
+        }
+
+        io.to(payload.gameId).emit('chat-broadcast', {
+          id: crypto.randomUUID(),
+          gameId: payload.gameId,
+          senderId,
+          senderName: normalizedSenderName,
+          text: normalizedText,
+          type: payload.type,
+          timestamp: now,
+        })
+      } catch (error) {
+        emitSocketError(socket, error)
+      }
+    })()
   })
 
   socket.on('show-cards', (payload: GamePlayerPayload) => {
@@ -731,6 +851,11 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
           throw new Error('Game not found')
         }
 
+        const socketInfo = getSocketInfo(socket.id)
+        if (socketInfo?.gameId === payload.gameId && socketInfo.isSpectator) {
+          throw new Error('Spectators cannot pause games')
+        }
+
         if (payload.playerId !== game.hostPlayerId) {
           throw new Error('Only the host can pause the game')
         }
@@ -764,6 +889,11 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
 
         if (!game) {
           throw new Error('Game not found')
+        }
+
+        const socketInfo = getSocketInfo(socket.id)
+        if (socketInfo?.gameId === payload.gameId && socketInfo.isSpectator) {
+          throw new Error('Spectators cannot resume games')
         }
 
         if (payload.playerId !== game.hostPlayerId) {
@@ -831,6 +961,11 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
           throw new Error('Game not found')
         }
 
+        const socketInfo = getSocketInfo(socket.id)
+        if (socketInfo?.gameId === payload.gameId && socketInfo.isSpectator) {
+          throw new Error('Spectators cannot rebuy')
+        }
+
         const player = game.players.find((candidate) => candidate.id === payload.playerId)
 
         if (!player) {
@@ -882,12 +1017,33 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
           return
         }
 
-        let nextGame = markPlayerDisconnected(game, socketInfo.playerId)
+        if (socketInfo.isSpectator) {
+          if (!socketInfo.spectatorId) {
+            return
+          }
+
+          const nextGame: GameState = {
+            ...game,
+            spectators: game.spectators.filter((spectator) => spectator.id !== socketInfo.spectatorId),
+          }
+
+          gameStore.set(nextGame.id, nextGame)
+          await saveGame(nextGame)
+          await broadcastGameState(io, nextGame)
+          return
+        }
+
+        if (!socketInfo.playerId) {
+          return
+        }
+
+        const disconnectedPlayerId = socketInfo.playerId
+        let nextGame = markPlayerDisconnected(game, disconnectedPlayerId)
 
         // Reassign host if needed
-        if (nextGame.hostPlayerId === socketInfo.playerId) {
+        if (nextGame.hostPlayerId === disconnectedPlayerId) {
           const newHost = nextGame.players.find(
-            p => p.id !== socketInfo.playerId && p.isConnected
+            p => p.id !== disconnectedPlayerId && p.isConnected
           )
           if (newHost) {
             nextGame = { ...nextGame, hostPlayerId: newHost.id }
@@ -898,7 +1054,6 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
         await saveGame(nextGame)
         await broadcastGameState(io, nextGame)
 
-        const disconnectedPlayerId = socketInfo.playerId
         const disconnectedGameId = socketInfo.gameId
 
         // Evict the game from memory after 5 minutes if all players are gone
