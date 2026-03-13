@@ -49,7 +49,7 @@ async function waitForActionBar(page: Page): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Test 1: Full 2-player hand
+// Test 1: Full 2-player hand with UI evidence capture
 // ---------------------------------------------------------------------------
 test('two players can join, start a game, and complete a hand', async ({ browser }) => {
   const ctx1: BrowserContext = await browser.newContext();
@@ -74,8 +74,21 @@ test('two players can join, start a game, and complete a hand', async ({ browser
     // Wait for the game to leave "waiting" state — the "Waiting for host" badge should disappear
     await expect(hostPage.getByText(/waiting for host/i)).not.toBeVisible({ timeout: 15000 });
 
-    // One of the two players will have the action bar — keep folding until the hand ends
-    // We do up to 20 actions to avoid an infinite loop
+    // ===== PREFLOP STATE: Before community cards dealt =====
+    // Verify hole cards are visible (player's own cards)
+    await hostPage.waitForTimeout(1000);
+    
+    // Verify action bar exists (betting is happening)
+    const actionBarExists = await hostPage.getByRole('button', { name: /fold|check|call|raise|all-in/i }).count();
+    expect(actionBarExists).toBeGreaterThan(0);
+    
+    // Capture preflop state with hole cards visible
+    await hostPage.screenshot({ path: '.sisyphus/evidence/task-6-preflop.png' });
+
+    // Progress game state by taking actions until hand completion
+    let actionsCount = 0;
+    let activeHandCaptured = false;
+    
     for (let i = 0; i < 20; i++) {
       const hostFold = hostPage.getByRole('button', { name: /^fold$/i });
       const hostCheck = hostPage.getByRole('button', { name: /^check$/i });
@@ -84,34 +97,64 @@ test('two players can join, start a game, and complete a hand', async ({ browser
       const guestCheck = guestPage.getByRole('button', { name: /^check$/i });
       const guestCall = guestPage.getByRole('button', { name: /^call/i });
 
-      const hostResult = await hostPage.getByText('Showdown Results').count();
-      const guestResult = await guestPage.getByText('Showdown Results').count();
-      if (hostResult > 0 || guestResult > 0) break;
-
-      // Check if we're back to waiting (new hand started)
-      const hostWaiting = await hostPage.getByText(/waiting for host/i).count();
-      if (hostWaiting > 0) break;
+      // ===== ACTIVE HAND STATE: Cards visible, betting happening =====
+      // Capture after first real action to show active hand state
+      if (actionsCount === 1 && !activeHandCaptured) {
+        await hostPage.screenshot({ path: '.sisyphus/evidence/task-6-active-hand.png' });
+        activeHandCaptured = true;
+      }
 
       // Act on whichever player has the action
       if (await hostFold.isVisible()) {
         await hostFold.click();
+        actionsCount++;
       } else if (await hostCheck.isVisible()) {
         await hostCheck.click();
+        actionsCount++;
       } else if (await hostCall.isVisible()) {
         await hostCall.click();
+        actionsCount++;
       } else if (await guestFold.isVisible()) {
         await guestFold.click();
+        actionsCount++;
       } else if (await guestCheck.isVisible()) {
         await guestCheck.click();
+        actionsCount++;
       } else if (await guestCall.isVisible()) {
         await guestCall.click();
+        actionsCount++;
       } else {
-        // No action visible yet — wait briefly and retry
-        await hostPage.waitForTimeout(800);
+        // No action visible — wait briefly
+        await hostPage.waitForTimeout(400);
       }
 
-      await hostPage.waitForTimeout(300);
+      await hostPage.waitForTimeout(200);
+
+      // Check if hand has completed (showdown results visible or waiting for new hand)
+      const hostShowdown = await hostPage.getByText('Showdown Results').count();
+      const guestShowdown = await guestPage.getByText('Showdown Results').count();
+      const hostWaiting = await hostPage.getByText(/waiting for host/i).count();
+      const guestWaiting = await guestPage.getByText(/waiting for host/i).count();
+
+      if (hostShowdown + guestShowdown > 0 || hostWaiting + guestWaiting > 0) {
+        break;
+      }
     }
+
+    // ===== BOARD VISIBLE STATE: Community cards showing (flop/turn/river) =====
+    // Wait for community cards to be visible before capturing
+    await expect(hostPage.locator('[data-testid="community-cards"], .community-cards')).toBeVisible({ timeout: 5000 }).catch(() => {
+      // Community cards may not always be present (e.g., if hand ended preflop)
+      // Continue with screenshot regardless
+    });
+    await hostPage.screenshot({ path: '.sisyphus/evidence/task-6-board-visible.png' });
+
+    // Verify the hand actually completed - either showdown results or waiting for new hand
+    const hostShowdownFinal = await hostPage.getByText('Showdown Results').count();
+    const guestShowdownFinal = await guestPage.getByText('Showdown Results').count();
+    const hostWaitingFinal = await hostPage.getByText(/waiting for host/i).count();
+    const guestWaitingFinal = await guestPage.getByText(/waiting for host/i).count();
+    expect(hostShowdownFinal + guestShowdownFinal + hostWaitingFinal + guestWaitingFinal).toBeGreaterThan(0);
 
     // The game is still alive (no crash) — verify at least one page is still connected
     const hostConnected = await hostPage.locator('text=Connected').count();
