@@ -3,6 +3,7 @@ node_modules/
 .env
 *.tsbuildinfo
 drizzle/
+.sisyphus/
 .sisyphus/evidence/
 .sisyphus/notepads/
 .sisyphus/boulder.json
