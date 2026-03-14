@@ -3,7 +3,6 @@ import { PotDisplay } from './PotDisplay';
 import { CommunityCards } from './CommunityCards';
 import { PlayerSeat } from './PlayerSeat';
 import { ActionBar } from '@/components/ActionBar';
-import { PreActionBar } from '@/components/PreActionBar';
 import type { HandResultEvent } from '@/lib/useGameSocket';
 
 interface PokerTableProps {
@@ -122,9 +121,6 @@ export function PokerTable({ gameState, playerId, onAction, actionConfirmation, 
         </div>
       )}
 
-      {!isTurn && isPlaying && !actionConfirmation && (
-        <PreActionBar gameState={gameState} playerId={playerId} onAction={onAction} />
-      )}
     </div>
   );
 }

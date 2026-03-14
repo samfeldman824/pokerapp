@@ -59,7 +59,7 @@ test('keyboard shortcuts badges appear on action buttons', async ({ browser }) =
   }
 });
 
-test('pre-action checkboxes render when not active player', async ({ browser }) => {
+test('pre-action controls are not rendered for any player', async ({ browser }) => {
   const ctx1: BrowserContext = await browser.newContext();
   const ctx2: BrowserContext = await browser.newContext();
   const hostPage: Page = await ctx1.newPage();
@@ -72,13 +72,12 @@ test('pre-action checkboxes render when not active player', async ({ browser }) 
     await hostPage.getByRole('button', { name: /start game/i }).click();
     await expect(hostPage.getByText(/waiting for host/i)).not.toBeVisible({ timeout: 15000 });
 
-    await guestPage.getByText(/pre-actions/i).waitFor({ state: 'visible', timeout: 10000 });
-    
-    const foldCheckbox = guestPage.getByRole('checkbox', { name: 'Fold', exact: true });
-    await expect(foldCheckbox).toBeVisible();
-    
-    const checkFoldCheckbox = guestPage.getByRole('checkbox', { name: /check\/fold/i });
-    await expect(checkFoldCheckbox).toBeVisible();
+    await expect(hostPage.getByText(/pre-actions/i)).toHaveCount(0);
+    await expect(guestPage.getByText(/pre-actions/i)).toHaveCount(0);
+    await expect(hostPage.getByRole('checkbox', { name: 'Fold', exact: true })).toHaveCount(0);
+    await expect(guestPage.getByRole('checkbox', { name: 'Fold', exact: true })).toHaveCount(0);
+    await expect(hostPage.getByRole('checkbox', { name: /check\/fold/i })).toHaveCount(0);
+    await expect(guestPage.getByRole('checkbox', { name: /check\/fold/i })).toHaveCount(0);
   } finally {
     await ctx1.close();
     await ctx2.close();
