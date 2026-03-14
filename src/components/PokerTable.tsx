@@ -43,7 +43,7 @@ export function PokerTable({ gameState, playerId, onAction, actionConfirmation, 
   };
 
   const isTurn = isPlaying && gameState.activePlayerIndex === currentPlayerSeatIndex;
-  const showActionBar = isTurn || Boolean(actionConfirmation);
+  const showActionBar = (isTurn || Boolean(actionConfirmation)) && !gameState.isPaused;
 
   const seatedPlayers = gameState.players.filter(Boolean);
   const maxSeats = gameState.config.maxPlayers;

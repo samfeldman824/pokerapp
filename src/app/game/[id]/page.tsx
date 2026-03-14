@@ -426,6 +426,25 @@ export default function GamePage() {
     }
   };
 
+  useEffect(() => {
+    const isHostPlayer = gameState && playerId === gameState.hostPlayerId;
+    if (!isHostPlayer) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeElement = document.activeElement as HTMLElement;
+      const isInputActive = activeElement?.tagName === 'INPUT' || activeElement?.tagName === 'TEXTAREA';
+      if (isInputActive) return;
+
+      if (e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        handlePauseResume();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [gameState, playerId, handlePauseResume]);
+
   /** Resets the game back to Waiting phase, keeping all players but restoring chip stacks. */
   const handleResetGame = () => {
     if (!playerId) return;
@@ -680,6 +699,14 @@ export default function GamePage() {
             }
           >
             {connectionBanner.message}
+          </div>
+        </div>
+      )}
+
+      {gameState?.isPaused && (
+        <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-40 pointer-events-none">
+          <div className="rounded-2xl border border-amber-500/40 bg-amber-950/80 backdrop-blur-sm px-8 py-4 text-center shadow-2xl">
+            <span className="text-amber-300 text-lg font-bold tracking-widest uppercase">Game Paused</span>
           </div>
         </div>
       )}
