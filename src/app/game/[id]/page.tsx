@@ -99,6 +99,7 @@ export default function GamePage() {
 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const isChatOpenRef = useRef(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
   const onChatMessage = useCallback((msg: ChatMessage) => {
@@ -107,12 +108,11 @@ export default function GamePage() {
       if (prev.some((m) => m.id === msg.id)) return prev;
       return [...prev, msg];
     });
-    setIsChatOpen((prevIsOpen) => {
-      if (!prevIsOpen) {
-        setUnreadCount((prevCount) => prevCount + 1);
-      }
-      return prevIsOpen;
-    });
+    // Read isChatOpen from a ref to avoid calling setUnreadCount inside a
+    // state updater, which React may invoke multiple times (Strict/Concurrent Mode).
+    if (!isChatOpenRef.current) {
+      setUnreadCount((prevCount) => prevCount + 1);
+    }
   }, []);
 
   const { gameState, playerId, spectatorId, isConnected, lastError, lastHandResult, emit } = useGameSocket(gameId, { onChatMessage });
@@ -128,11 +128,13 @@ export default function GamePage() {
     emit('chat-message', { gameId, senderId, senderName, text, type });
   }, [emit, gameId, playerId, spectatorId, gameState, displayName]);
 
+  useEffect(() => {
+    isChatOpenRef.current = isChatOpen;
+    if (isChatOpen) setUnreadCount(0);
+  }, [isChatOpen]);
+
   const handleToggleChat = useCallback(() => {
-    setIsChatOpen(prev => {
-      if (!prev) setUnreadCount(0);
-      return !prev;
-    });
+    setIsChatOpen(prev => !prev);
   }, []);
 
   const isSpectator = !!spectatorId;
