@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import { GameState, PlayerState } from './types'
+import { GamePhase, GameState, PlayerState } from './types'
 
 /**
  * Creates a new player token for reconnection
@@ -181,13 +181,11 @@ export function rebuyPlayer(game: GameState, playerId: string): GameState {
     throw new Error('Already at or above starting stack')
   }
 
-  // Prevent rebuy while player is actively in a hand
-  if (
-    player.holeCards !== null ||
-    player.totalBetThisHand > 0 ||
-    player.bet > 0 ||
-    player.isAllIn
-  ) {
+  const nonFoldedActiveCount = game.players.filter(
+    p => !p.isFolded && (p.isAllIn || p.chips > 0)
+  ).length
+  const handIsOver = game.phase === GamePhase.Showdown || nonFoldedActiveCount <= 1
+  if (game.phase !== GamePhase.Waiting && !handIsOver) {
     throw new Error(`Player ${playerId} cannot rebuy during an active hand`)
   }
 

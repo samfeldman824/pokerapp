@@ -59,6 +59,7 @@ import {
 } from '../engine/types'
 import {
   saveGame,
+  saveGameWithRebuy,
   saveHand,
   saveHandAction,
   saveHandResults,
@@ -984,9 +985,10 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
           throw new Error('Rebuy only allowed between hands')
         }
 
-        const nextGame = player.chips < game.config.startingStack ? rebuyPlayer(game, payload.playerId) : game
+        const rebuyAmount = game.config.startingStack - player.chips
+        const nextGame = rebuyPlayer(game, payload.playerId)
         gameStore.set(nextGame.id, nextGame)
-        await saveGame(nextGame)
+        await saveGameWithRebuy(nextGame, payload.playerId, rebuyAmount)
         await broadcastGameState(io, nextGame)
       } catch (error) {
         emitSocketError(socket, error)

@@ -11,7 +11,7 @@ import {
   removePlayer,
   shouldAutoFoldDisconnected,
 } from './playerManager'
-import { GameConfig, GameState, Rank, Suit } from './types'
+import { GameConfig, GamePhase, GameState, Rank, Suit } from './types'
 
 function makeLobby(configOverrides: Partial<GameConfig> = {}): GameState {
   return createGame({ ...DEFAULT_CONFIG, ...configOverrides })
@@ -90,15 +90,18 @@ describe('playerManager', () => {
     expect(player?.chips).toBe(500)
   })
 
-  it('rebuyPlayer() throws when player is short-stacked but actively in a hand (has holeCards)', () => {
+  it('rebuyPlayer() throws when player is short-stacked and hand is in progress (Preflop)', () => {
     let game = makeLobby({ startingStack: 500 })
-    const added = addPlayer(game, 'A', 0)
-    game = added.game
+    const addedA = addPlayer(game, 'A', 0)
+    game = addedA.game
+    const addedB = addPlayer(game, 'B', 1)
+    game = addedB.game
 
     const inHand: GameState = {
       ...game,
+      phase: GamePhase.Preflop,
       players: game.players.map(p =>
-        p.id === added.playerId
+        p.id === addedA.playerId
           ? {
               ...p,
               chips: 100,
@@ -111,22 +114,53 @@ describe('playerManager', () => {
       ),
     }
 
-    expect(() => rebuyPlayer(inHand, added.playerId)).toThrow(/cannot rebuy during an active hand/i)
+    expect(() => rebuyPlayer(inHand, addedA.playerId)).toThrow(/cannot rebuy during an active hand/i)
   })
 
-  it('rebuyPlayer() throws when player has totalBetThisHand > 0 (mid-hand)', () => {
+  it('rebuyPlayer() throws when hand is at River (mid-hand, multiple players still active)', () => {
+    let game = makeLobby({ startingStack: 500 })
+    const addedA = addPlayer(game, 'A', 0)
+    game = addedA.game
+    const addedB = addPlayer(game, 'B', 1)
+    game = addedB.game
+
+    const midHand: GameState = {
+      ...game,
+      phase: GamePhase.River,
+      players: game.players.map(p =>
+        p.id === addedA.playerId ? { ...p, chips: 200, totalBetThisHand: 50 } : p
+      ),
+    }
+
+    expect(() => rebuyPlayer(midHand, addedA.playerId)).toThrow(/cannot rebuy during an active hand/i)
+  })
+
+  it('rebuyPlayer() allows rebuy at Showdown (hand complete, hole cards still set)', () => {
     let game = makeLobby({ startingStack: 500 })
     const added = addPlayer(game, 'A', 0)
     game = added.game
 
-    const midHand: GameState = {
+    const atShowdown: GameState = {
       ...game,
+      phase: GamePhase.Showdown,
       players: game.players.map(p =>
-        p.id === added.playerId ? { ...p, chips: 200, totalBetThisHand: 50 } : p
+        p.id === added.playerId
+          ? {
+              ...p,
+              chips: 0,
+              isAllIn: false,
+              holeCards: [
+                { rank: Rank.Ace, suit: Suit.Spades },
+                { rank: Rank.King, suit: Suit.Clubs },
+              ],
+              totalBetThisHand: 500,
+            }
+          : p
       ),
     }
 
-    expect(() => rebuyPlayer(midHand, added.playerId)).toThrow(/cannot rebuy during an active hand/i)
+    const result = rebuyPlayer(atShowdown, added.playerId)
+    expect(result.players.find(p => p.id === added.playerId)?.chips).toBe(500)
   })
 
   it('rebuyPlayer() throws when player chips equals startingStack (exactly at stack)', () => {

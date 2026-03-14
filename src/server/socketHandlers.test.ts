@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 vi.mock('../db/persistence', () => ({
   saveGame: vi.fn(),
+  saveGameWithRebuy: vi.fn(),
   savePlayer: vi.fn(),
   saveHand: vi.fn().mockResolvedValue('hand-id'),
   saveHandAction: vi.fn(),

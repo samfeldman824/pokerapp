@@ -12,7 +12,7 @@
  * at the start of each hand via `startHand`.
  */
 
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import type { GameConfig, GameState, HandResult, PlayerState } from '../engine/types'
 import { DEFAULT_CONFIG } from '../engine/constants'
@@ -303,4 +303,62 @@ export async function updatePlayerChipsCarriedOut(
     .update(players)
     .set({ chipsCarriedOut: chips })
     .where(eq(players.id, playerId))
+}
+
+/**
+ * Atomically increments a player's chipsBroughtIn by `amount`.
+ * Called on every rebuy / top-up so the ledger reflects the total money
+ * brought to the table, not just the initial buy-in.
+ */
+export async function addToPlayerBuyIn(
+  playerId: string,
+  amount: number,
+): Promise<void> {
+  await db
+    .update(players)
+    .set({ chipsBroughtIn: sql`${players.chipsBroughtIn} + ${amount}` })
+    .where(eq(players.id, playerId))
+}
+
+/**
+ * Atomically persists a game state update and increments a player's
+ * `chipsBroughtIn` in a single transaction. Use this for rebuys so that
+ * the game snapshot and the ledger are always consistent — a partial write
+ * cannot leave chips restored in the game but unrecorded in the ledger.
+ */
+export async function saveGameWithRebuy(
+  game: GameState,
+  playerId: string,
+  rebuyAmount: number,
+): Promise<void> {
+  const status = game.isPaused ? 'paused' : 'active'
+  const { deck: _deck, spectators: _spectators, ...gameSnapshot } = game
+  const createdAt = new Date()
+
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(games)
+      .values({
+        id: game.id,
+        config: game.config,
+        status,
+        hostPlayerId: game.hostPlayerId,
+        gameState: gameSnapshot,
+        createdAt,
+      })
+      .onConflictDoUpdate({
+        target: games.id,
+        set: {
+          config: game.config,
+          status,
+          hostPlayerId: game.hostPlayerId,
+          gameState: gameSnapshot,
+        },
+      })
+
+    await tx
+      .update(players)
+      .set({ chipsBroughtIn: sql`${players.chipsBroughtIn} + ${rebuyAmount}` })
+      .where(eq(players.id, playerId))
+  })
 }
