@@ -47,6 +47,7 @@ export const CommunityCards: React.FC<CommunityCardsProps> = ({ cards, phase, ha
   const prevBoardKeyRef = useRef<string | null>(null);
   const prevCardsRef = useRef<CardType[]>([]);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const isFirstEffectRunRef = useRef<boolean>(true);
 
   useEffect(() => {
     if (isResetCondition(phase, cards)) {
@@ -56,6 +57,7 @@ export const CommunityCards: React.FC<CommunityCardsProps> = ({ cards, phase, ha
       setRevealStates(Array(5).fill('idle'));
       prevBoardKeyRef.current = null;
       prevCardsRef.current = [];
+      isFirstEffectRunRef.current = false;
       return;
     }
 
@@ -65,7 +67,10 @@ export const CommunityCards: React.FC<CommunityCardsProps> = ({ cards, phase, ha
       timersRef.current.forEach(clearTimeout);
       timersRef.current = [];
 
-      if (prevBoardKeyRef.current === null && cards.length > 0) {
+      const isReconnectWithExistingCards = isFirstEffectRunRef.current && cards.length > 0;
+      isFirstEffectRunRef.current = false;
+
+      if (isReconnectWithExistingCards) {
         setDisplayedCards([...cards]);
         setRevealStates((prev) => {
           const next = [...prev];
