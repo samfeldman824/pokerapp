@@ -93,6 +93,227 @@ describe('gameController', () => {
     expect(afterCall.phase).not.toBe(GamePhase.Preflop)
   })
 
+  it('handleAction() runs board out automatically when only one player is not all-in after preflop', () => {
+    const lobby = makeGame({ playerCount: 3 })
+    const started = startHand(lobby)
+    const p0 = bySeat(started, 0)
+    const p1 = bySeat(started, 1)
+    const p2 = bySeat(started, 2)
+
+    const setupGame: GameState = {
+      ...started,
+      phase: GamePhase.Preflop,
+      currentBet: 500,
+      playersToAct: [p2.seatIndex],
+      activePlayerIndex: p2.seatIndex,
+      players: started.players.map((p) => {
+        if (p.id === p0.id) return { ...p, chips: 0, bet: 500, totalBetThisHand: 500, isAllIn: true }
+        if (p.id === p1.id) return { ...p, chips: 0, bet: 500, totalBetThisHand: 500, isAllIn: true }
+        if (p.id === p2.id) return { ...p, chips: 1000, bet: 0, totalBetThisHand: 0, isAllIn: false }
+        return p
+      }),
+    }
+
+    const result = handleAction(setupGame, p2.id, { type: ActionType.Call })
+
+    expect(result.phase).toBe(GamePhase.Showdown)
+    expect(result.activePlayerIndex).toBe(-1)
+    expect(result.communityCards).toHaveLength(5)
+  })
+
+  it('handleAction() runs board out when player goes all-in on flop and is called by bigger stack', () => {
+    const lobby = makeGame({ playerCount: 2 })
+    const started = startHand(lobby)
+    const p0 = bySeat(started, 0)
+    const p1 = bySeat(started, 1)
+
+    const flopGame: GameState = {
+      ...started,
+      phase: GamePhase.Flop,
+      currentBet: 0,
+      communityCards: started.deck.slice(0, 3),
+      deck: started.deck.slice(3),
+      pot: 10,
+      playersToAct: [p0.seatIndex, p1.seatIndex],
+      activePlayerIndex: p0.seatIndex,
+      players: started.players.map((p) => {
+        if (p.id === p0.id) return { ...p, chips: 100, bet: 0, totalBetThisHand: 5, isFolded: false, isAllIn: false }
+        if (p.id === p1.id) return { ...p, chips: 500, bet: 0, totalBetThisHand: 5, isFolded: false, isAllIn: false }
+        return p
+      }),
+    }
+
+    const afterAllIn = handleAction(flopGame, p0.id, { type: ActionType.Bet, amount: 100 })
+    expect(afterAllIn.phase).toBe(GamePhase.Flop)
+    expect(afterAllIn.activePlayerIndex).toBe(p1.seatIndex)
+
+    const result = handleAction(afterAllIn, p1.id, { type: ActionType.Call })
+
+    expect(result.phase).toBe(GamePhase.Showdown)
+    expect(result.activePlayerIndex).toBe(-1)
+    expect(result.communityCards).toHaveLength(5)
+  })
+
+  it('handleAction() runs board out via real flow: preflop call, flop all-in, bigger stack calls', () => {
+    const lobby = makeGame({ playerCount: 2 })
+    const started = startHand(lobby)
+    const p0 = bySeat(started, 0)
+    const p1 = bySeat(started, 1)
+
+    const afterCall = handleAction(started, p0.id, { type: ActionType.Call })
+    const afterFlop = handleAction(afterCall, p1.id, { type: ActionType.Check })
+    expect(afterFlop.phase).toBe(GamePhase.Flop)
+
+    const flopP0 = bySeat(afterFlop, p0.seatIndex)
+    const flopP1 = bySeat(afterFlop, p1.seatIndex)
+    const firstActor = afterFlop.activePlayerIndex === flopP0.seatIndex ? flopP0 : flopP1
+    const secondActor = firstActor.id === flopP0.id ? flopP1 : flopP0
+
+    const afterFlopAllIn = handleAction(afterFlop, firstActor.id, {
+      type: ActionType.Bet,
+      amount: firstActor.chips,
+    })
+    expect(afterFlopAllIn.phase).toBe(GamePhase.Flop)
+    expect(afterFlopAllIn.activePlayerIndex).toBe(secondActor.seatIndex)
+
+    const result = handleAction(afterFlopAllIn, secondActor.id, { type: ActionType.Call })
+
+    expect(result.phase).toBe(GamePhase.Showdown)
+    expect(result.activePlayerIndex).toBe(-1)
+    expect(result.communityCards).toHaveLength(5)
+  })
+
+  it('handleAction() runs board out when mid-street fold leaves only one non-all-in player', () => {
+    const lobby = makeGame({ playerCount: 3 })
+    const started = startHand(lobby)
+    const p0 = bySeat(started, 0)
+    const p1 = bySeat(started, 1)
+    const p2 = bySeat(started, 2)
+
+    const flopGame: GameState = {
+      ...started,
+      phase: GamePhase.Flop,
+      currentBet: 0,
+      communityCards: started.deck.slice(0, 3),
+      deck: started.deck.slice(3),
+      pot: 300,
+      playersToAct: [p0.seatIndex, p2.seatIndex],
+      activePlayerIndex: p0.seatIndex,
+      players: started.players.map((p) => {
+        if (p.id === p0.id) return { ...p, chips: 200, bet: 0, totalBetThisHand: 100, isFolded: false }
+        if (p.id === p1.id) return { ...p, chips: 0, bet: 0, totalBetThisHand: 100, isAllIn: true }
+        if (p.id === p2.id) return { ...p, chips: 700, bet: 0, totalBetThisHand: 100, isFolded: false }
+        return p
+      }),
+    }
+
+    const result = handleAction(flopGame, p0.id, { type: ActionType.Fold })
+
+    expect(result.phase).toBe(GamePhase.Showdown)
+    expect(result.activePlayerIndex).toBe(-1)
+    expect(result.communityCards).toHaveLength(5)
+  })
+
+  it('handleAction() runs board out when player goes all-in on Turn and is called by bigger stack', () => {
+    const lobby = makeGame({ playerCount: 2 })
+    const started = startHand(lobby)
+    const p0 = bySeat(started, 0)
+    const p1 = bySeat(started, 1)
+
+    const turnGame: GameState = {
+      ...started,
+      phase: GamePhase.Turn,
+      currentBet: 0,
+      communityCards: started.deck.slice(0, 4),
+      deck: started.deck.slice(4),
+      pot: 10,
+      playersToAct: [p0.seatIndex, p1.seatIndex],
+      activePlayerIndex: p0.seatIndex,
+      players: started.players.map((p) => {
+        if (p.id === p0.id) return { ...p, chips: 100, bet: 0, totalBetThisHand: 5, isFolded: false, isAllIn: false }
+        if (p.id === p1.id) return { ...p, chips: 500, bet: 0, totalBetThisHand: 5, isFolded: false, isAllIn: false }
+        return p
+      }),
+    }
+
+    const afterAllIn = handleAction(turnGame, p0.id, { type: ActionType.Bet, amount: 100 })
+    expect(afterAllIn.phase).toBe(GamePhase.Turn)
+    expect(afterAllIn.activePlayerIndex).toBe(p1.seatIndex)
+
+    const result = handleAction(afterAllIn, p1.id, { type: ActionType.Call })
+
+    expect(result.phase).toBe(GamePhase.Showdown)
+    expect(result.activePlayerIndex).toBe(-1)
+    expect(result.communityCards).toHaveLength(5)
+  })
+
+  it('handleAction() runs board out when mid-Turn fold leaves only one non-all-in player', () => {
+    const lobby = makeGame({ playerCount: 3 })
+    const started = startHand(lobby)
+    const p0 = bySeat(started, 0)
+    const p1 = bySeat(started, 1)
+    const p2 = bySeat(started, 2)
+
+    const turnGame: GameState = {
+      ...started,
+      phase: GamePhase.Turn,
+      currentBet: 0,
+      communityCards: started.deck.slice(0, 4),
+      deck: started.deck.slice(4),
+      pot: 300,
+      playersToAct: [p0.seatIndex, p2.seatIndex],
+      activePlayerIndex: p0.seatIndex,
+      players: started.players.map((p) => {
+        if (p.id === p0.id) return { ...p, chips: 200, bet: 0, totalBetThisHand: 100, isFolded: false, isAllIn: false }
+        if (p.id === p1.id) return { ...p, chips: 0, bet: 0, totalBetThisHand: 100, isAllIn: true }
+        if (p.id === p2.id) return { ...p, chips: 700, bet: 0, totalBetThisHand: 100, isFolded: false, isAllIn: false }
+        return p
+      }),
+    }
+
+    const result = handleAction(turnGame, p0.id, { type: ActionType.Fold })
+
+    expect(result.phase).toBe(GamePhase.Showdown)
+    expect(result.activePlayerIndex).toBe(-1)
+    expect(result.communityCards).toHaveLength(5)
+  })
+
+  it('handleAction() runs board out via real flow: 3-player, p0 folds preflop, p1 all-in on flop, p2 bigger stack calls', () => {
+    const lobby = makeGame({ playerCount: 3 })
+    const started = startHand(lobby)
+    const p0 = bySeat(started, 0)
+    const p1 = bySeat(started, 1)
+    const p2 = bySeat(started, 2)
+
+    const afterP0Fold = handleAction(started, p0.id, { type: ActionType.Fold })
+    const afterP1Call = handleAction(afterP0Fold, p1.id, { type: ActionType.Call })
+    const afterFlop = handleAction(afterP1Call, p2.id, { type: ActionType.Check })
+    expect(afterFlop.phase).toBe(GamePhase.Flop)
+
+    const flopP1 = bySeat(afterFlop, p1.seatIndex)
+    const flopP2 = bySeat(afterFlop, p2.seatIndex)
+    const flopWithSmallStack: GameState = {
+      ...afterFlop,
+      players: afterFlop.players.map((p) => {
+        if (!p) return p
+        if (p.id === flopP1.id) return { ...p, chips: 50, isAllIn: false }
+        return p
+      }),
+    }
+
+    expect(flopWithSmallStack.activePlayerIndex).toBe(p1.seatIndex)
+
+    const afterAllIn = handleAction(flopWithSmallStack, flopP1.id, { type: ActionType.Bet, amount: 50 })
+    expect(afterAllIn.phase).toBe(GamePhase.Flop)
+    expect(afterAllIn.activePlayerIndex).toBe(flopP2.seatIndex)
+
+    const result = handleAction(afterAllIn, flopP2.id, { type: ActionType.Call })
+
+    expect(result.phase).toBe(GamePhase.Showdown)
+    expect(result.activePlayerIndex).toBe(-1)
+    expect(result.communityCards).toHaveLength(5)
+  })
+
   it('isHandComplete() false during preflop; true after showdown', () => {
     const started = startHand(makeGame({ playerCount: 2 }))
     expect(isHandComplete(started)).toBe(false)

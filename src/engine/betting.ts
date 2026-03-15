@@ -82,6 +82,10 @@ function canStillAct(player: SeatedPlayer): boolean {
   return isEligibleToAct(player) && player.chips > 0
 }
 
+function countNonAllInActivePlayers(game: GameState): number {
+  return getSeatedPlayers(game).filter((p) => !p.isFolded && !p.isAllIn && p.chips > 0).length
+}
+
 /**
  * Finds the next occupied seat (wrapping around) starting strictly after
  * `fromSeat`. Returns -1 if no seat is found (shouldn't happen in a live game).
@@ -526,7 +530,13 @@ export function applyAction(game: GameState, action: PlayerAction): GameState {
  * an uncontested pot (all but one player folded) before consulting this.
  */
 export function isRoundComplete(game: GameState): boolean {
-  return normalizePlayersToAct(game).length === 0
+  if (normalizePlayersToAct(game).length === 0) return true
+  if (countNonAllInActivePlayers(game) <= 1) {
+    const currentBet = getCurrentBet(game)
+    const onlyActive = getSeatedPlayers(game).find((p) => !p.isFolded && !p.isAllIn && p.chips > 0)
+    if (!onlyActive || onlyActive.bet >= currentBet) return true
+  }
+  return false
 }
 
 /**
@@ -595,6 +605,14 @@ export function advancePhase(game: GameState): GameState {
   }
 
   const playersToAct = getInitialRoundOrder(nextGame).filter((seatIndex) => canStillAct(getPlayerAtSeat(nextGame, seatIndex)))
+
+  if (playersToAct.length <= 1) {
+    return {
+      ...nextGame,
+      playersToAct: [],
+      activePlayerIndex: -1,
+    }
+  }
 
   return {
     ...nextGame,
