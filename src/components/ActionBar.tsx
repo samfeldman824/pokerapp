@@ -25,9 +25,14 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
   
   const [raiseAmount, setRaiseAmount] = useState<number>(minRaise);
   const [raiseInputValue, setRaiseInputValue] = useState<string>(String(minRaise));
+  const [isRaiseOpen, setIsRaiseOpen] = useState(false);
   const raiseInputRef = useRef<HTMLInputElement>(null);
 
   const isPlayerTurn = !!player && gameState.activePlayerIndex >= 0 && player.seatIndex === gameState.activePlayerIndex;
+
+  useEffect(() => {
+    if (!isPlayerTurn) setIsRaiseOpen(false);
+  }, [isPlayerTurn]);
 
   useEffect(() => {
     const newAmount = Math.min(currentBet + minRaise, allInAmount);
@@ -39,6 +44,15 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
   const canCall = currentBet > playerBet && playerChips > 0;
   const canRaise = playerChips > callAmount;
 
+  const openRaise = () => {
+    setIsRaiseOpen(true);
+    setTimeout(() => raiseInputRef.current?.focus(), 0);
+  };
+
+  const closeRaise = () => {
+    setIsRaiseOpen(false);
+  };
+
   // Keyboard shortcuts
   useEffect(() => {
     if (!isPlayerTurn || isActing) {
@@ -46,19 +60,24 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Get active element
       const activeElement = document.activeElement as HTMLElement;
       const isInputActive = activeElement?.tagName === 'INPUT' || activeElement?.tagName === 'TEXTAREA';
       const isRaiseInputFocused = raiseInputRef.current === activeElement;
 
-      // Handle Enter on raise input separately
+      if (e.key === 'Escape') {
+        if (isRaiseOpen) {
+          e.preventDefault();
+          closeRaise();
+        }
+        return;
+      }
+
       if (e.key === 'Enter' && isRaiseInputFocused) {
         e.preventDefault();
         handleRaise();
         return;
       }
 
-      // Ignore all other shortcuts when typing in inputs
       if (isInputActive) {
         return;
       }
@@ -79,20 +98,24 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
         case 'r':
           e.preventDefault();
           if (canRaise) {
-            raiseInputRef.current?.focus();
+            if (!isRaiseOpen) {
+              openRaise();
+            } else {
+              handleRaise();
+            }
           }
           break;
         case '1':
           e.preventDefault();
-          if (canRaise) calcHalfPot();
+          if (canRaise && isRaiseOpen) calcHalfPot();
           break;
         case '2':
           e.preventDefault();
-          if (canRaise) calcPot();
+          if (canRaise && isRaiseOpen) calcPot();
           break;
         case '3':
           e.preventDefault();
-          if (canRaise) calcAllIn();
+          if (canRaise && isRaiseOpen) calcAllIn();
           break;
         default:
           break;
@@ -101,7 +124,7 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [canCheck, canCall, canRaise, isActing, isPlayerTurn, raiseAmount]);
+  }, [canCheck, canCall, canRaise, isActing, isPlayerTurn, raiseAmount, isRaiseOpen]);
 
   if (!player) return null;
   const isBet = POSTFLOP_STREETS.includes(gameState.phase) && currentBet === 0;
@@ -132,6 +155,7 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
       : Math.max(minVal, Math.min(num, allInAmount));
     setRaiseAmount(finalAmount);
     setRaiseInputValue(String(finalAmount));
+    setIsRaiseOpen(false);
     submitAction(
       isBet
         ? { type: ActionType.Bet, amount: finalAmount }
@@ -209,6 +233,61 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
             <kbd className="absolute top-1 right-1 text-xs bg-amber-900/40 text-amber-500 px-1.5 py-0.5 rounded font-mono border border-amber-700/30">C</kbd>
           </button>
 
+          {canRaise && (
+            <button
+              onClick={() => isRaiseOpen ? handleRaise() : openRaise()}
+              disabled={!isPlayerTurn || isActing}
+              className={`flex-1 md:flex-none px-8 py-3 rounded-lg font-bold text-sm tracking-widest uppercase transition-all border flex items-center justify-center gap-2 relative disabled:opacity-30 disabled:cursor-not-allowed ${
+                isRaiseOpen && isPlayerTurn
+                  ? 'bg-amber-500 text-amber-950 hover:bg-amber-400 border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.3)]'
+                  : 'bg-amber-500/20 text-amber-500 hover:bg-amber-500/30 border-amber-500/30 disabled:hover:bg-amber-500/20'
+              }`}
+            >
+              <span>{raiseLabel}</span>
+              {isRaiseOpen && isPlayerTurn && (
+                <span
+                  className="inline-flex items-center gap-0.5"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <span className="opacity-70">$</span>
+                  <input
+                    ref={raiseInputRef}
+                    type="number"
+                    value={raiseInputValue}
+                    onChange={(e) => {
+                      setRaiseInputValue(e.target.value);
+                      const num = Number(e.target.value);
+                      if (!isNaN(num) && e.target.value !== '') setRaiseAmount(num);
+                    }}
+                    onBlur={() => {
+                      const num = Number(raiseInputValue);
+                      if (isNaN(num) || raiseInputValue === '') {
+                        const minVal = Math.min(currentBet + minRaise, allInAmount);
+                        setRaiseAmount(minVal);
+                        setRaiseInputValue(String(minVal));
+                      } else {
+                        setRaiseClamped(num);
+                      }
+                    }}
+                    onFocus={e => e.target.select()}
+                    onClick={e => e.stopPropagation()}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { e.preventDefault(); handleRaise(); }
+                      if (e.key === 'Escape') { e.preventDefault(); closeRaise(); }
+                    }}
+                    disabled={isActing}
+                    className="w-16 bg-transparent text-inherit font-bold text-right outline-none cursor-text [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                </span>
+              )}
+              <kbd className={`absolute top-1 right-1 text-xs px-1.5 py-0.5 rounded font-mono border ${
+                isRaiseOpen && isPlayerTurn
+                  ? 'bg-amber-700 text-amber-100 border-amber-600'
+                  : 'bg-amber-900/40 text-amber-500 border-amber-700/30'
+              }`}>R</kbd>
+            </button>
+          )}
+
           {potOdds !== null && (
             <div className="flex items-center rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-emerald-300">
               Pot Odds: {potOdds}%
@@ -217,61 +296,21 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
         </div>
 
         {canRaise && (
-          <div className={`flex flex-col gap-3 w-full md:w-auto md:min-w-[320px]${!isPlayerTurn ? ' invisible' : ''}`}>
-            <div className="flex items-center gap-3">
-              <input
-                type="range"
-                min={Math.min(currentBet + minRaise, allInAmount)}
-                max={allInAmount}
-                step={1}
-                value={raiseAmount}
-                onChange={(e) => {
-                  const val = Number(e.target.value);
-                  setRaiseAmount(val);
-                  setRaiseInputValue(String(val));
-                }}
-                disabled={isActing}
-                className="flex-1 h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
-              />
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-500/50 font-bold">$</span>
-                <input
-                  type="number"
-                  ref={raiseInputRef}
-                  min={Math.min(currentBet + minRaise, allInAmount)}
-                  max={allInAmount}
-                  value={raiseInputValue}
-                  onChange={(e) => {
-                    setRaiseInputValue(e.target.value);
-                    const num = Number(e.target.value);
-                    if (!isNaN(num) && e.target.value !== '') {
-                      setRaiseAmount(num);
-                    }
-                  }}
-                  onBlur={() => {
-                    const num = Number(raiseInputValue);
-                    if (isNaN(num) || raiseInputValue === '') {
-                      const minVal = Math.min(currentBet + minRaise, allInAmount);
-                      setRaiseAmount(minVal);
-                      setRaiseInputValue(String(minVal));
-                    } else {
-                      setRaiseClamped(num);
-                    }
-                  }}
-                  onFocus={(e) => e.target.select()}
-                  disabled={isActing}
-                  className="w-24 bg-neutral-950 border border-neutral-800 rounded py-2 pl-7 pr-3 text-amber-400 font-bold text-right focus:outline-none focus:border-amber-500/50 transition-colors"
-                />
-              </div>
-              <button
-                onClick={handleRaise}
-                disabled={isActing}
-                className="px-6 py-2 rounded font-bold text-sm tracking-widest uppercase transition-all bg-amber-500 text-amber-950 hover:bg-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.3)] relative"
-              >
-                {raiseLabel}
-                <kbd className="absolute top-0.5 right-1 text-xs bg-amber-700 text-amber-100 px-1 py-0.5 rounded font-mono border border-amber-600">R</kbd>
-              </button>
-            </div>
+          <div className={`flex flex-col gap-3 w-full md:w-auto md:min-w-[320px]${!isPlayerTurn || !isRaiseOpen ? ' invisible' : ''}`}>
+            <input
+              type="range"
+              min={Math.min(currentBet + minRaise, allInAmount)}
+              max={allInAmount}
+              step={1}
+              value={raiseAmount}
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                setRaiseAmount(val);
+                setRaiseInputValue(String(val));
+              }}
+              disabled={isActing}
+              className="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+            />
             
             <div className="flex gap-2 justify-end">
               <button onClick={calcHalfPot} disabled={isActing} className="px-3 py-1 rounded text-xs font-bold uppercase tracking-wider bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-white transition-colors relative disabled:opacity-40 disabled:cursor-not-allowed">
@@ -291,12 +330,6 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
         )}
 
       </div>
-
-      {confirmationMessage && (
-        <div className="max-w-3xl mx-auto mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-center text-sm font-semibold tracking-wide text-emerald-300">
-          {confirmationMessage}
-        </div>
-      )}
     </div>
   );
 };
