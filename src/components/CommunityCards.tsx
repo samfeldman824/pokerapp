@@ -4,10 +4,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Card as CardType, GamePhase } from '@/engine/types';
 import { Card } from './Card';
 import {
-  FLOP_STAGGER,
   PER_CARD_REVEAL_DURATION,
   REVEAL_SETTLE_BUFFER,
-  TURN_RIVER_DELAY,
   getBoardSnapshotKey,
   detectNewIndices,
   isResetCondition,
@@ -64,6 +62,23 @@ export const CommunityCards: React.FC<CommunityCardsProps> = ({ cards, phase, ha
     const currentKey = getBoardSnapshotKey(cards, handNumber);
 
     if (prevBoardKeyRef.current !== currentKey) {
+      timersRef.current.forEach(clearTimeout);
+      timersRef.current = [];
+
+      if (prevBoardKeyRef.current === null && cards.length > 0) {
+        setDisplayedCards([...cards]);
+        setRevealStates((prev) => {
+          const next = [...prev];
+          for (let i = 0; i < cards.length; i++) {
+            next[i] = 'settled';
+          }
+          return next;
+        });
+        prevBoardKeyRef.current = currentKey;
+        prevCardsRef.current = [...cards];
+        return;
+      }
+
       const newIndices = detectNewIndices(prevCardsRef.current, cards);
       const schedule = getRevealSchedule(newIndices);
 
