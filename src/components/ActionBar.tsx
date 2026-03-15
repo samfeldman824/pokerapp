@@ -168,28 +168,14 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
     setRaiseInputValue(String(allInAmount));
   };
 
-  if (!isPlayerTurn) {
-    if (!confirmationMessage) {
-      return null;
-    }
-
-    return (
-      <div className="fixed bottom-0 left-0 right-0 bg-neutral-900/95 backdrop-blur border-t border-neutral-800 p-4 shadow-2xl z-50">
-        <div className="max-w-3xl mx-auto rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-center text-sm font-semibold tracking-wide text-emerald-300">
-          {confirmationMessage}
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="fixed bottom-0 left-0 right-0 bg-neutral-900/95 backdrop-blur border-t border-neutral-800 p-4 shadow-2xl z-50">
-      <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center gap-6 justify-between">
-        
-        <div className="w-full md:w-auto flex-shrink-0 flex items-center justify-center md:justify-start">
+      <div className={`max-w-6xl mx-auto flex flex-col md:flex-row items-center gap-6 justify-between transition-opacity duration-300${!isPlayerTurn ? ' opacity-50' : ''}`}>
+
+        <div className={`w-full md:w-auto flex-shrink-0 flex items-center justify-center md:justify-start${!isPlayerTurn ? ' invisible' : ''}`}>
           <ActionTimer 
             timePerAction={gameState.config.timePerAction} 
-            timerStart={gameState.actionTimerStart} 
+            timerStart={isPlayerTurn ? gameState.actionTimerStart : null} 
             onTimeout={handleTimeout}
           />
         </div>
@@ -197,8 +183,8 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
         <div className="flex gap-3 flex-1 justify-center w-full">
           <button
             onClick={handleFold}
-            disabled={isActing}
-            className="flex-1 md:flex-none px-6 py-3 rounded-lg font-bold text-sm tracking-widest uppercase transition-all bg-neutral-800 text-neutral-300 hover:bg-neutral-700 hover:text-white border border-neutral-700 relative"
+            disabled={!isPlayerTurn || isActing}
+            className="flex-1 md:flex-none px-6 py-3 rounded-lg font-bold text-sm tracking-widest uppercase transition-all bg-neutral-800 text-neutral-300 hover:bg-neutral-700 hover:text-white border border-neutral-700 relative disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-neutral-800 disabled:hover:text-neutral-300"
           >
             Fold
             <kbd className="absolute top-1 right-1 text-xs bg-neutral-700 text-neutral-300 px-1.5 py-0.5 rounded font-mono border border-neutral-600">F</kbd>
@@ -206,7 +192,7 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
 
           <button
             onClick={handleCheck}
-            disabled={!canCheck || isActing}
+            disabled={!isPlayerTurn || !canCheck || isActing}
             className="flex-1 md:flex-none px-8 py-3 rounded-lg font-bold text-sm tracking-widest uppercase transition-all bg-amber-500/20 text-amber-500 hover:bg-amber-500/30 border border-amber-500/30 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-amber-500/20 relative"
           >
             Check
@@ -215,7 +201,7 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
 
           <button
             onClick={handleCall}
-            disabled={!canCall || isActing}
+            disabled={!isPlayerTurn || !canCall || isActing}
             className="flex-1 md:flex-none px-8 py-3 rounded-lg font-bold text-sm tracking-widest uppercase transition-all bg-amber-500/20 text-amber-500 hover:bg-amber-500/30 border border-amber-500/30 flex items-center justify-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-amber-500/20 relative"
           >
             <span>Call</span>
@@ -231,7 +217,7 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
         </div>
 
         {canRaise && (
-          <div className="flex flex-col gap-3 w-full md:w-auto md:min-w-[320px]">
+          <div className={`flex flex-col gap-3 w-full md:w-auto md:min-w-[320px]${!isPlayerTurn ? ' invisible' : ''}`}>
             <div className="flex items-center gap-3">
               <input
                 type="range"
@@ -304,12 +290,13 @@ export const ActionBar: React.FC<ActionBarProps> = ({ gameState, playerId, onAct
           </div>
         )}
 
-        {confirmationMessage && (
-          <div className="w-full md:w-auto rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-center text-sm font-semibold tracking-wide text-emerald-300">
-            {confirmationMessage}
-          </div>
-        )}
       </div>
+
+      {confirmationMessage && (
+        <div className="max-w-3xl mx-auto mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-center text-sm font-semibold tracking-wide text-emerald-300">
+          {confirmationMessage}
+        </div>
+      )}
     </div>
   );
 };
