@@ -141,10 +141,13 @@ function getRemainingPlayers(game: GameState): PlayerState[] {
 /**
  * Awards all pots to the sole remaining player (everyone else folded).
  *
- * Side pots are respected even when only one player remains — a player who
- * went all-in for less than the full pot still can't win chips they weren't
- * eligible for. We recalculate pots from `totalBetThisHand` to get the
- * correct eligibility boundaries.
+ * Side pots are respected: for each pot we check whether the winner is
+ * eligible. If the winner is not eligible for a pot (e.g. they went all-in
+ * for less than what a now-folded player contributed), those chips are
+ * returned to the folded players who contributed to that band.
+ *
+ * We recalculate pots from `totalBetThisHand` to get the correct eligibility
+ * boundaries across all streets.
  */
 function awardUncontestedPot(game: GameState, winner: PlayerState): GameState {
   // Use totalBetThisHand as the "bet" amount so calculatePots sees the full
@@ -156,19 +159,38 @@ function awardUncontestedPot(game: GameState, winner: PlayerState): GameState {
   }))
   const pots = calculatePots(potPlayers)
 
-  const potAwards = pots.map((pot, potIndex) => ({
-    potIndex,
-    amount: pot.amount,
-    winnerIds: [winner.id],
-    handDescription: '',
-  }))
+  // Reconstruct the lower bound of each pot's band so we can identify which
+  // folded players contributed chips to an ineligible pot.
+  const allInLevels = [...new Set(
+    potPlayers.filter(p => p.isAllIn && p.bet > 0).map(p => p.bet)
+  )].sort((a, b) => a - b)
+  // bandLowers[i] is the exclusive lower bound for pots[i]:
+  //   pots[0] covers (0, allInLevels[0]], pots[1] covers (allInLevels[0], allInLevels[1]], etc.
+  const bandLowers = [0, ...allInLevels]
 
-  const updatedHandPlayers = distributePotWinnings(
-    handPlayers.map(p => ({ ...p, bet: 0 })),
-    pots,
-    potAwards.map(award => award.winnerIds),
-    game.dealerIndex
-  )
+  const chipAdjustments = new Map<string, number>()
+  for (let potIndex = 0; potIndex < pots.length; potIndex++) {
+    const pot = pots[potIndex]
+    if (pot.eligiblePlayerIds.includes(winner.id)) {
+      chipAdjustments.set(winner.id, (chipAdjustments.get(winner.id) ?? 0) + pot.amount)
+    } else {
+      const bandLower = bandLowers[potIndex] ?? 0
+      const bandUpper = allInLevels[potIndex]
+      for (const player of potPlayers) {
+        if (!player.isFolded || player.bet <= bandLower) continue
+        const refund = bandUpper !== undefined
+          ? Math.min(player.bet, bandUpper) - bandLower
+          : player.bet - bandLower
+        chipAdjustments.set(player.id, (chipAdjustments.get(player.id) ?? 0) + refund)
+      }
+    }
+  }
+
+  const updatedHandPlayers = handPlayers.map(p => ({
+    ...p,
+    bet: 0,
+    chips: p.chips + (chipAdjustments.get(p.id) ?? 0),
+  }))
 
   return {
     ...game,
