@@ -63,6 +63,31 @@ describe('potCalculator', () => {
     ])
   })
 
+  it('calculatePots() includes a folded partial contributor below the all-in level', () => {
+    const pots = calculatePots([
+      player('sb', 10, { isFolded: true }),
+      player('a', 50, { isAllIn: true }),
+      player('b', 50),
+    ])
+
+    expect(pots).toEqual([
+      { amount: 110, eligiblePlayerIds: ['a', 'b'] },
+    ])
+  })
+
+  it('calculatePots() handles partial contributor below all-in with overflow pot', () => {
+    const pots = calculatePots([
+      player('sb', 10, { isFolded: true }),
+      player('a', 50, { isAllIn: true }),
+      player('b', 100),
+    ])
+
+    expect(pots).toEqual([
+      { amount: 110, eligiblePlayerIds: ['a', 'b'] },
+      { amount: 50, eligiblePlayerIds: ['b'] },
+    ])
+  })
+
   it('splitPotEvenly() splits evenly and reports remainder', () => {
     expect(splitPotEvenly(10, 2)).toEqual({ perPlayer: 5, remainder: 0 })
     expect(splitPotEvenly(11, 2)).toEqual({ perPlayer: 5, remainder: 1 })

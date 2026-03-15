@@ -38,14 +38,19 @@ function getContributingPlayers(players: PlayerState[]): PlayerState[] {
   return players.filter(player => player.bet > 0)
 }
 
+function chipsInBand(bet: number, low: number, high: number): number {
+  return Math.max(0, Math.min(bet, high) - Math.min(bet, low))
+}
+
 /**
  * Splits contributions into a main pot and side pots based on all-in levels.
  *
  * Algorithm:
  * 1. Collect all distinct all-in amounts (sorted ascending) — these are the
  *    "level" boundaries that create new side pots.
- * 2. For each level, every player who contributed at least that much contributes
- *    `(level - previousLevel)` chips to this pot.
+ * 2. For each level, sum each player's actual chips in the band (previousLevel, level]
+ *    using `chipsInBand`. This correctly captures partial contributors (e.g. a blind
+ *    poster who folded before meeting the all-in level).
  * 3. Any chips above the highest all-in level go into a final pot that only
  *    non-all-in players are eligible to win.
  *
@@ -72,8 +77,9 @@ export function calculatePots(players: PlayerState[]): SidePot[] {
   let previousLevel = 0
 
   for (const level of allInLevels) {
-    const contributorsAtLevel = contributingPlayers.filter(player => player.bet >= level)
-    const amount = contributorsAtLevel.length * (level - previousLevel)
+    const amount = contributingPlayers.reduce((sum, player) => {
+      return sum + chipsInBand(player.bet, previousLevel, level)
+    }, 0)
 
     if (amount > 0) {
       pots.push({
