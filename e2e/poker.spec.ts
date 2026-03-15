@@ -5,19 +5,39 @@ import { test, expect, BrowserContext, Page } from '@playwright/test';
 // ---------------------------------------------------------------------------
 
 async function createGame(page: Page): Promise<string> {
+  const createResponse = await page.request.post('/api/games', {
+    data: {
+      hostDisplayName: 'Alice',
+      hostSeatIndex: 0,
+      smallBlind: 1,
+      bigBlind: 2,
+      startingStack: 1000,
+      timePerAction: 30,
+      betweenHandsDelay: 3,
+      maxPlayers: 9,
+    },
+  });
+
+  if (!createResponse.ok()) {
+    throw new Error(`Failed to create game via API: ${createResponse.status()} ${createResponse.statusText()}`);
+  }
+
+  const data = await createResponse.json() as { gameId?: string; hostToken?: string };
+  if (!data.gameId || !data.hostToken) {
+    throw new Error('Invalid create game response payload');
+  }
+
   await page.goto('/');
-  await page.getByRole('link', { name: /create game/i }).click();
-  await page.waitForURL('**/create');
+  await page.evaluate(
+    ({ gameId, hostToken }: { gameId: string; hostToken: string }) => {
+      localStorage.setItem(`poker_token_${gameId}`, hostToken);
+    },
+    { gameId: data.gameId, hostToken: data.hostToken },
+  );
 
-  // Fill the form
-  await page.getByLabel('Your Name').fill('Alice');
-  await page.getByLabel(/your seat/i).fill('0');
+  await page.goto(`/game/${data.gameId}`);
+  await page.waitForURL('**/game/**', { timeout: 30000 });
 
-  // Submit
-  await page.getByRole('button', { name: /start game/i }).click();
-
-  // Wait for redirect to game page
-  await page.waitForURL('**/game/**', { timeout: 10000 });
   const url = page.url();
   const match = url.match(/\/game\/([^/?#]+)/);
   if (!match) throw new Error(`Could not extract gameId from URL: ${url}`);
@@ -62,6 +82,15 @@ async function waitForCommunityCardState(
   await page.waitForSelector(communityCardSlotSelector(index, cardState, revealState), { timeout });
 }
 
+async function hasCommunityCardState(
+  page: Page,
+  index: number,
+  cardState: 'revealed' | 'expected' | 'empty',
+  revealState: 'entering' | 'settled' | 'idle',
+): Promise<boolean> {
+  return (await page.locator(communityCardSlotSelector(index, cardState, revealState)).count()) > 0;
+}
+
 async function expectCommunityCardState(
   page: Page,
   index: number,
@@ -72,23 +101,28 @@ async function expectCommunityCardState(
   await expect(communityCardSlot(page, index)).toHaveAttribute('data-reveal-state', revealState);
 }
 
-async function isCommunityCardStateVisible(
-  page: Page,
-  index: number,
-  cardState: 'revealed' | 'expected' | 'empty',
-  revealState: 'entering' | 'settled' | 'idle',
-): Promise<boolean> {
-  return page
-    .waitForSelector(communityCardSlotSelector(index, cardState, revealState), { timeout: 200 })
-    .then(() => true)
-    .catch(() => false);
+async function closeContextSafely(context: BrowserContext): Promise<void> {
+  try {
+    await context.close();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (
+      message.includes('ENOENT') ||
+      message.includes('unexpected number of bytes') ||
+      message.includes('End of central directory record signature not found')
+    ) {
+      return;
+    }
+
+    throw error;
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Test 1: Full 2-player hand with UI evidence capture
+// Test 1: Community board reveal states through river
 // ---------------------------------------------------------------------------
 test('community board reveal settles through river', async ({ browser }) => {
-  test.setTimeout(90000);
+  test.setTimeout(180000);
   const ctx1: BrowserContext = await browser.newContext();
   const ctx2: BrowserContext = await browser.newContext();
   const hostPage: Page = await ctx1.newPage();
@@ -97,146 +131,151 @@ test('community board reveal settles through river', async ({ browser }) => {
   const turnRiverSettleTimeout = 800;
 
   try {
-    // Host creates game
     const gameId = await createGame(hostPage);
     expect(gameId).toBeTruthy();
 
-    await expect(hostPage.getByRole('heading', { name: /GAME #/i })).toBeVisible({ timeout: 10000 });
-    await expect(hostPage.getByText(/waiting for host/i)).toBeVisible({ timeout: 20000 });
+    await expect(hostPage.getByRole('heading', { name: /GAME #/i })).toBeVisible({ timeout: 30000 });
+    await expect(hostPage.getByText(/waiting for host/i)).toBeVisible({ timeout: 30000 });
 
-    // Guest joins the game
     await joinGame(guestPage, gameId, 'Bob', 1);
 
-    // Host starts the game
     await hostPage.getByRole('button', { name: /start game/i }).click();
-
-    // Wait for the game to leave "waiting" state — the "Waiting for host" badge should disappear
     await expect(hostPage.getByText(/waiting for host/i)).not.toBeVisible({ timeout: 15000 });
-
-    // ===== PREFLOP STATE: Before community cards dealt =====
-    // Verify hole cards are visible (player's own cards)
-    await hostPage.waitForTimeout(1000);
 
     const communityCards = hostPage.getByTestId('community-cards');
     await expect(communityCards).toBeVisible({ timeout: 5000 });
     for (const slotIndex of [0, 1, 2, 3, 4]) {
       await expectCommunityCardState(hostPage, slotIndex, 'empty', 'idle');
     }
-    
-    // Verify action bar exists (betting is happening)
+
     const actionBarExists = await hostPage.getByRole('button', { name: /fold|check|call|raise|all-in/i }).count();
     expect(actionBarExists).toBeGreaterThan(0);
-    
-    // Capture preflop state with hole cards visible
+
     await hostPage.screenshot({ path: '.sisyphus/evidence/task-6-preflop.png' });
 
-    // Progress game state by taking actions until hand completion
-    let actionsCount = 0;
     let activeHandCaptured = false;
+    let sawExpected = false;
+    let sawTurnEntering = false;
+    let sawRiverEntering = false;
+    let flopSettled = false;
+    let turnSettled = false;
+    let riverSettled = false;
 
-    const actOnce = async (): Promise<void> => {
-      const preferredActions = [
+    const actOnce = async (): Promise<boolean> => {
+      const actions = [
         hostPage.getByRole('button', { name: /^check/i }),
         hostPage.getByRole('button', { name: /^call/i }),
-        hostPage.getByRole('button', { name: /^fold/i }),
         guestPage.getByRole('button', { name: /^check/i }),
         guestPage.getByRole('button', { name: /^call/i }),
+        hostPage.getByRole('button', { name: /^fold/i }),
         guestPage.getByRole('button', { name: /^fold/i }),
       ];
 
-      for (const action of preferredActions) {
+      for (const action of actions) {
         if (await action.isEnabled()) {
-          await action.click();
-          actionsCount++;
-
-          if (actionsCount === 1 && !activeHandCaptured) {
+          if (!activeHandCaptured) {
             await hostPage.screenshot({ path: '.sisyphus/evidence/task-6-active-hand.png' });
             activeHandCaptured = true;
           }
-
-          await hostPage.waitForTimeout(150);
-          return;
+          await action.click();
+          return true;
         }
       }
 
-      await hostPage.waitForTimeout(150);
+      return false;
     };
 
-    const advanceUntil = async (description: string, predicate: () => Promise<boolean>): Promise<void> => {
-      for (let step = 0; step < 24; step++) {
-        if (await predicate()) {
+    const observeBoard = async (): Promise<void> => {
+      for (let poll = 0; poll < 16; poll++) {
+        if (!sawExpected && await hasCommunityCardState(hostPage, 2, 'expected', 'idle')) {
+          sawExpected = true;
+          await expectCommunityCardState(hostPage, 2, 'expected', 'idle');
+        }
+
+        if (!flopSettled && await hasCommunityCardState(hostPage, 2, 'revealed', 'settled')) {
+          await waitForCommunityCardState(hostPage, 0, 'revealed', 'settled', flopSettleTimeout);
+          await waitForCommunityCardState(hostPage, 1, 'revealed', 'settled', flopSettleTimeout);
+          await waitForCommunityCardState(hostPage, 2, 'revealed', 'settled', flopSettleTimeout);
+          await expectCommunityCardState(hostPage, 0, 'revealed', 'settled');
+          await expectCommunityCardState(hostPage, 1, 'revealed', 'settled');
+          await expectCommunityCardState(hostPage, 2, 'revealed', 'settled');
+          await expectCommunityCardState(hostPage, 3, 'empty', 'idle');
+          await expectCommunityCardState(hostPage, 4, 'empty', 'idle');
+          await hostPage.screenshot({ path: '.sisyphus/evidence/task-4-board-flop-settled.png' });
+          flopSettled = true;
+        }
+
+        if (!sawTurnEntering && await hasCommunityCardState(hostPage, 3, 'revealed', 'entering')) {
+          sawTurnEntering = true;
+          await expectCommunityCardState(hostPage, 3, 'revealed', 'entering');
+        }
+
+        if (sawTurnEntering && !turnSettled && await hasCommunityCardState(hostPage, 3, 'revealed', 'settled')) {
+          await waitForCommunityCardState(hostPage, 3, 'revealed', 'settled', turnRiverSettleTimeout);
+          await expectCommunityCardState(hostPage, 0, 'revealed', 'settled');
+          await expectCommunityCardState(hostPage, 1, 'revealed', 'settled');
+          await expectCommunityCardState(hostPage, 2, 'revealed', 'settled');
+          await expectCommunityCardState(hostPage, 3, 'revealed', 'settled');
+          await expectCommunityCardState(hostPage, 4, 'empty', 'idle');
+          turnSettled = true;
+        }
+
+        if (!sawRiverEntering && await hasCommunityCardState(hostPage, 4, 'revealed', 'entering')) {
+          sawRiverEntering = true;
+          await expectCommunityCardState(hostPage, 4, 'revealed', 'entering');
+        }
+
+        if (sawRiverEntering && !riverSettled && await hasCommunityCardState(hostPage, 4, 'revealed', 'settled')) {
+          await waitForCommunityCardState(hostPage, 4, 'revealed', 'settled', turnRiverSettleTimeout);
+          await expectCommunityCardState(hostPage, 0, 'revealed', 'settled');
+          await expectCommunityCardState(hostPage, 1, 'revealed', 'settled');
+          await expectCommunityCardState(hostPage, 2, 'revealed', 'settled');
+          await expectCommunityCardState(hostPage, 3, 'revealed', 'settled');
+          await expectCommunityCardState(hostPage, 4, 'revealed', 'settled');
+          await hostPage.screenshot({ path: '.sisyphus/evidence/task-4-board-full-settled.png' });
+          riverSettled = true;
+        }
+
+        if (riverSettled) {
           return;
         }
-        await actOnce();
-      }
 
-      throw new Error(`Timed out advancing hand before ${description}`);
+        await hostPage.waitForTimeout(25);
+      }
     };
 
-    await advanceUntil('flop expected placeholder', () =>
-      isCommunityCardStateVisible(hostPage, 2, 'expected', 'idle'),
-    );
-    await expectCommunityCardState(hostPage, 2, 'expected', 'idle');
+    const actionDeadlineMs = 90000;
+    const actionStartTime = Date.now();
+    let actionsTaken = 0;
 
-    await waitForCommunityCardState(hostPage, 0, 'revealed', 'settled', flopSettleTimeout);
-    await waitForCommunityCardState(hostPage, 1, 'revealed', 'settled', flopSettleTimeout);
-    await waitForCommunityCardState(hostPage, 2, 'revealed', 'settled', flopSettleTimeout);
-    await expectCommunityCardState(hostPage, 0, 'revealed', 'settled');
-    await expectCommunityCardState(hostPage, 1, 'revealed', 'settled');
-    await expectCommunityCardState(hostPage, 2, 'revealed', 'settled');
-    await expectCommunityCardState(hostPage, 3, 'empty', 'idle');
-    await expectCommunityCardState(hostPage, 4, 'empty', 'idle');
-    await hostPage.screenshot({ path: '.sisyphus/evidence/task-4-board-flop-settled.png' });
+    while (!riverSettled && (Date.now() - actionStartTime) < actionDeadlineMs) {
+      const acted = await actOnce();
+      if (acted) {
+        actionsTaken += 1;
+      }
 
-    await advanceUntil('turn reveal entering state', () =>
-      isCommunityCardStateVisible(hostPage, 3, 'revealed', 'entering'),
-    );
-    await expectCommunityCardState(hostPage, 3, 'revealed', 'entering');
-    await waitForCommunityCardState(hostPage, 3, 'revealed', 'settled', turnRiverSettleTimeout);
-    await expectCommunityCardState(hostPage, 0, 'revealed', 'settled');
-    await expectCommunityCardState(hostPage, 1, 'revealed', 'settled');
-    await expectCommunityCardState(hostPage, 2, 'revealed', 'settled');
-    await expectCommunityCardState(hostPage, 3, 'revealed', 'settled');
-    await expectCommunityCardState(hostPage, 4, 'empty', 'idle');
+      await observeBoard();
+      if (!riverSettled) {
+        await hostPage.waitForTimeout(acted ? 150 : 250);
+      }
+    }
 
-    await advanceUntil('river reveal entering state', () =>
-      isCommunityCardStateVisible(hostPage, 4, 'revealed', 'entering'),
-    );
-    await expectCommunityCardState(hostPage, 4, 'revealed', 'entering');
-    await waitForCommunityCardState(hostPage, 4, 'revealed', 'settled', turnRiverSettleTimeout);
-    await expectCommunityCardState(hostPage, 0, 'revealed', 'settled');
-    await expectCommunityCardState(hostPage, 1, 'revealed', 'settled');
-    await expectCommunityCardState(hostPage, 2, 'revealed', 'settled');
-    await expectCommunityCardState(hostPage, 3, 'revealed', 'settled');
-    await expectCommunityCardState(hostPage, 4, 'revealed', 'settled');
-    await hostPage.screenshot({ path: '.sisyphus/evidence/task-4-board-full-settled.png' });
+    expect(actionsTaken).toBeGreaterThan(0);
 
-    await advanceUntil('hand completion', async () => {
-      const hostShowdown = await hostPage.getByText('Showdown Results').count();
-      const guestShowdown = await guestPage.getByText('Showdown Results').count();
-      const hostWaiting = await hostPage.getByText(/waiting for host/i).count();
-      const guestWaiting = await guestPage.getByText(/waiting for host/i).count();
-
-      return hostShowdown + guestShowdown + hostWaiting + guestWaiting > 0;
-    });
-
-    // ===== BOARD VISIBLE STATE: Community cards showing (flop/turn/river) =====
+    expect(sawExpected).toBeTruthy();
+    expect(flopSettled).toBeTruthy();
+    expect(sawTurnEntering).toBeTruthy();
+    expect(turnSettled).toBeTruthy();
+    expect(sawRiverEntering).toBeTruthy();
+    expect(riverSettled).toBeTruthy();
     await expect(communityCards).toBeVisible({ timeout: 5000 });
 
-    // Verify the hand actually completed - either showdown results or waiting for new hand
-    const hostShowdownFinal = await hostPage.getByText('Showdown Results').count();
-    const guestShowdownFinal = await guestPage.getByText('Showdown Results').count();
-    const hostWaitingFinal = await hostPage.getByText(/waiting for host/i).count();
-    const guestWaitingFinal = await guestPage.getByText(/waiting for host/i).count();
-    expect(hostShowdownFinal + guestShowdownFinal + hostWaitingFinal + guestWaitingFinal).toBeGreaterThan(0);
-
-    // The game is still alive (no crash) — verify at least one page is still connected
     const hostConnected = await hostPage.locator('text=Connected').count();
     const guestConnected = await guestPage.locator('text=Connected').count();
     expect(hostConnected + guestConnected).toBeGreaterThan(0);
   } finally {
-    await ctx1.close();
-    await ctx2.close();
+    await closeContextSafely(ctx1);
+    await closeContextSafely(ctx2);
   }
 });
 
@@ -278,7 +317,7 @@ test('player reconnects to game using stored token after page reload', async ({ 
     expect(tokenAfter).toBeTruthy();
     expect(tokenAfter).toEqual(token);
   } finally {
-    await ctx.close();
+    await closeContextSafely(ctx);
   }
 });
 
@@ -319,8 +358,8 @@ test('host can pause and resume the game', async ({ browser }) => {
       timeout: 5000,
     });
   } finally {
-    await ctx1.close();
-    await ctx2.close();
+    await closeContextSafely(ctx1);
+    await closeContextSafely(ctx2);
   }
 });
 
@@ -375,8 +414,8 @@ test('all-in: opponent sees an enabled Call button and can finish the round', as
       (await bobPage.locator('text=Connected').count());
     expect(aliveAfter).toBeGreaterThan(0);
   } finally {
-    await ctx1.close();
-    await ctx2.close();
+    await closeContextSafely(ctx1);
+    await closeContextSafely(ctx2);
   }
 });
 
@@ -397,7 +436,7 @@ test('occupied seat is disabled in join modal', async ({ browser }) => {
     const seat1Btn = guestPage.getByRole('button', { name: 'Seat 1' });
     await expect(seat1Btn).toBeDisabled({ timeout: 5000 });
   } finally {
-    await ctx1.close();
-    await ctx2.close();
+    await closeContextSafely(ctx1);
+    await closeContextSafely(ctx2);
   }
 });

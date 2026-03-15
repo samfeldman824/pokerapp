@@ -43,6 +43,7 @@ export const CommunityCards: React.FC<CommunityCardsProps> = ({ cards, phase, ha
 
   const [displayedCards, setDisplayedCards] = useState<(CardType | null)[]>([]);
   const [revealStates, setRevealStates] = useState<RevealState[]>(Array(5).fill('idle'));
+  const [faceDownStates, setFaceDownStates] = useState<boolean[]>(Array(5).fill(false));
   
   const prevBoardKeyRef = useRef<string | null>(null);
   const prevCardsRef = useRef<CardType[]>([]);
@@ -55,6 +56,7 @@ export const CommunityCards: React.FC<CommunityCardsProps> = ({ cards, phase, ha
       timersRef.current = [];
       setDisplayedCards([]);
       setRevealStates(Array(5).fill('idle'));
+      setFaceDownStates(Array(5).fill(false));
       prevBoardKeyRef.current = null;
       prevCardsRef.current = [];
       isFirstEffectRunRef.current = false;
@@ -79,6 +81,7 @@ export const CommunityCards: React.FC<CommunityCardsProps> = ({ cards, phase, ha
           }
           return next;
         });
+        setFaceDownStates(Array(5).fill(false));
         prevBoardKeyRef.current = currentKey;
         prevCardsRef.current = [...cards];
         return;
@@ -100,6 +103,21 @@ export const CommunityCards: React.FC<CommunityCardsProps> = ({ cards, phase, ha
               next[index] = 'entering';
               return next;
             });
+            setFaceDownStates((prev) => {
+              const next = [...prev];
+              next[index] = true;
+              return next;
+            });
+
+            const flipTimerId = setTimeout(() => {
+              setFaceDownStates((prev) => {
+                const next = [...prev];
+                next[index] = false;
+                return next;
+              });
+            }, Math.floor(PER_CARD_REVEAL_DURATION / 2));
+
+            timersRef.current.push(flipTimerId);
 
             const settleTimerId = setTimeout(() => {
               setRevealStates((prev) => {
@@ -140,16 +158,18 @@ export const CommunityCards: React.FC<CommunityCardsProps> = ({ cards, phase, ha
         const enteringClass = revealState === 'entering' ? 'animate-card-reveal' : '';
 
         if (card) {
+          const isFaceDown = faceDownStates[i];
           return (
             <div 
               key={i} 
               data-testid={`community-card-slot-${i}`}
               data-card-state={cardState}
               data-reveal-state={revealState}
+              data-face-state={isFaceDown ? 'down' : 'up'}
               className={`${settledClass} ${enteringClass}`}
               style={{ animationDelay: '0ms' }}
             >
-              <Card card={card} size="lg" />
+              <Card card={card} size="lg" faceDown={isFaceDown} />
             </div>
           );
         }

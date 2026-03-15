@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import QRCode from 'qrcode'
 
 type InviteShareProps = {
   gameUrl: string
@@ -13,6 +12,7 @@ export function InviteShare({ gameUrl, onClose }: InviteShareProps) {
   useEffect(() => {
     async function generateQR() {
       try {
+        const { default: QRCode } = await import('qrcode')
         const dataUrl = await QRCode.toDataURL(gameUrl, {
           width: 256,
           margin: 2,

@@ -4,7 +4,7 @@ import { GamePhase } from '@/engine/types'
 /**
  * Timing constants for community card reveal animations (in milliseconds)
  */
-export const FLOP_STAGGER = 90
+export const FLOP_STAGGER = 120
 export const PER_CARD_REVEAL_DURATION = 260
 export const REVEAL_SETTLE_BUFFER = 120
 export const TURN_RIVER_DELAY = 0

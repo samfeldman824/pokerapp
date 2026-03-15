@@ -14,7 +14,7 @@
  *   5. Redirect to /game/[id].
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -69,7 +69,12 @@ const BLIND_PRESETS = {
 export default function CreateGamePage() {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
   const [errors, setErrors] = useState<FormErrors>({});
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   const [formData, setFormData] = useState({
     hostDisplayName: "",
@@ -491,7 +496,7 @@ export default function CreateGamePage() {
                 </span>
               </button>
             </div>
-            
+
           </form>
         </div>
       </div>

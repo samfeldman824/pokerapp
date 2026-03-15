@@ -14,8 +14,8 @@ import {
 
 describe('communityCardReveal', () => {
   describe('timing constants', () => {
-    it('FLOP_STAGGER should be 90ms', () => {
-      expect(FLOP_STAGGER).toBe(90)
+    it('FLOP_STAGGER should be 120ms', () => {
+      expect(FLOP_STAGGER).toBe(120)
     })
 
     it('PER_CARD_REVEAL_DURATION should be 260ms', () => {
@@ -40,8 +40,8 @@ describe('communityCardReveal', () => {
       const schedule = getRevealSchedule([0, 1, 2])
       expect(schedule).toEqual([
         { index: 0, delay: 0 },
-        { index: 1, delay: 90 },
-        { index: 2, delay: 180 },
+        { index: 1, delay: 120 },
+        { index: 2, delay: 240 },
       ])
     })
 

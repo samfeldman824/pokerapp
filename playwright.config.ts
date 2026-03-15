@@ -21,7 +21,7 @@ export default defineConfig({
   webServer: {
     command: 'npx tsx server.ts',
     port: 3000,
-    reuseExistingServer: true,
+    reuseExistingServer: false,
     timeout: 60000,
     env: {
       DATABASE_URL: 'postgresql://poker:poker@localhost:5433/pokerapp',

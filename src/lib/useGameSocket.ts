@@ -20,7 +20,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { ClientGameState, HandResult } from '@/engine/types'
 
-import { socket } from './socket'
+type SocketClient = import('socket.io-client').Socket
 
 export type HandResultEvent = {
   gameId: string
@@ -64,10 +64,11 @@ export function useGameSocket(gameId: string, options: UseGameSocketOptions = {}
   emit: (event: string, data: unknown) => void
   registerPlayer: (playerId: string) => void
 } {
+  const socketRef = useRef<SocketClient | null>(null)
   const [gameState, setGameState] = useState<ClientGameState | null>(null)
   const [playerId, setPlayerId] = useState<string | null>(null)
   const [spectatorId, setSpectatorId] = useState<string | null>(null)
-  const [isConnected, setIsConnected] = useState<boolean>(socket.connected)
+  const [isConnected, setIsConnected] = useState<boolean>(false)
   const [lastError, setLastError] = useState<string | null>(null)
   const [lastHandResult, setLastHandResult] = useState<HandResultEvent | null>(null)
   const onChatMessageRef = useRef<UseGameSocketOptions['onChatMessage']>(options.onChatMessage)
@@ -78,7 +79,7 @@ export function useGameSocket(gameId: string, options: UseGameSocketOptions = {}
 
   const emit = useCallback((event: string, data: unknown) => {
     setLastError(null)
-    socket.emit(event, data)
+    socketRef.current?.emit(event, data)
   }, [])
 
   /**
@@ -97,92 +98,104 @@ export function useGameSocket(gameId: string, options: UseGameSocketOptions = {}
 
   useEffect(() => {
     const playerKey = `poker_player_${gameId}`
+    let isCancelled = false
+    let detachListeners: (() => void) | null = null
 
     // Restore the player ID from storage immediately so the UI doesn't flash
     // into an unauthenticated state between mount and the first `joined` event.
     const storedPlayerId = localStorage.getItem(playerKey)
     if (storedPlayerId) setPlayerId(storedPlayerId)
 
-    const onConnect = () => {
-      setIsConnected(true)
-      // On reconnect, re-authenticate using the stored token.
-      // The server will restore the player's state without creating a new player record.
-      const storedToken = localStorage.getItem(`poker_token_${gameId}`)
-      if (storedToken) {
-        socket.emit('join-game', { gameId, token: storedToken })
+    ;(async () => {
+      const { io } = await import('socket.io-client')
+      if (isCancelled) {
+        return
       }
-    }
-    const onDisconnect = () => setIsConnected(false)
 
-    /**
-     * `joined` fires after the server successfully admits a player (new or reconnecting).
-     * - Always updates `playerId` and persists it.
-     * - Only updates the stored token if the server returns one (new joins return a token;
-     *   reconnects do not — the existing token remains valid).
-     */
-    const onJoined = (data: { playerId?: string; spectatorId?: string; token?: string }) => {
-      setLastError(null)
-      if (data.playerId) {
-        localStorage.setItem(playerKey, data.playerId)
-        setPlayerId(data.playerId)
-        setSpectatorId(null)
-        if (data.token) {
-          localStorage.setItem(`poker_token_${gameId}`, data.token)
+      const socket = io({ autoConnect: false })
+      socketRef.current = socket
+      setIsConnected(socket.connected)
+
+      const onConnect = () => {
+        setIsConnected(true)
+        const storedToken = localStorage.getItem(`poker_token_${gameId}`)
+        if (storedToken) {
+          socket.emit('join-game', { gameId, token: storedToken })
         }
-      } else if (data.spectatorId) {
-        setSpectatorId(data.spectatorId)
-        setPlayerId(null)
       }
-    }
 
-    const onGameState = (state: ClientGameState) => {
-      // Guard against stale events from a previous game room (shouldn't happen, but defensive)
-      if (state.id !== gameId) return
-      setLastError(null)
-      setGameState(state)
+      const onDisconnect = () => setIsConnected(false)
 
-      // Fallback: if playerId was cleared but localStorage still has it, restore it.
-      // This covers the edge case where the hook re-mounts after a HMR reload.
-      setPlayerId((prev) => {
-        if (prev) return prev
-        const stored = localStorage.getItem(playerKey)
-        return stored ?? null
-      })
-    }
+      const onJoined = (data: { playerId?: string; spectatorId?: string; token?: string }) => {
+        setLastError(null)
+        if (data.playerId) {
+          localStorage.setItem(playerKey, data.playerId)
+          setPlayerId(data.playerId)
+          setSpectatorId(null)
+          if (data.token) {
+            localStorage.setItem(`poker_token_${gameId}`, data.token)
+          }
+        } else if (data.spectatorId) {
+          setSpectatorId(data.spectatorId)
+          setPlayerId(null)
+        }
+      }
 
-    const onError = (data: { message: string }) => {
-      setLastError(data.message)
-    }
+      const onGameState = (state: ClientGameState) => {
+        if (state.id !== gameId) return
+        setLastError(null)
+        setGameState(state)
+        setPlayerId((prev) => {
+          if (prev) return prev
+          const stored = localStorage.getItem(playerKey)
+          return stored ?? null
+        })
+      }
 
-    const onHandResult = (event: HandResultEvent) => {
-      if (event.gameId !== gameId) return
-      setLastHandResult(event)
-    }
+      const onError = (data: { message: string }) => {
+        setLastError(data.message)
+      }
 
-    const onChatBroadcast = (event: ChatMessage) => {
-      if (event.gameId !== gameId) return
-      onChatMessageRef.current?.(event)
-    }
+      const onHandResult = (event: HandResultEvent) => {
+        if (event.gameId !== gameId) return
+        setLastHandResult(event)
+      }
 
-    socket.on('connect', onConnect)
-    socket.on('disconnect', onDisconnect)
-    socket.on('joined', onJoined)
-    socket.on('game-state', onGameState)
-    socket.on('chat-broadcast', onChatBroadcast)
-    socket.on('error', onError)
-    socket.on('hand-result', onHandResult)
+      const onChatBroadcast = (event: ChatMessage) => {
+        if (event.gameId !== gameId) return
+        onChatMessageRef.current?.(event)
+      }
 
-    socket.connect()
+      socket.on('connect', onConnect)
+      socket.on('disconnect', onDisconnect)
+      socket.on('joined', onJoined)
+      socket.on('game-state', onGameState)
+      socket.on('chat-broadcast', onChatBroadcast)
+      socket.on('error', onError)
+      socket.on('hand-result', onHandResult)
+      socket.connect()
+
+      detachListeners = () => {
+        socket.off('connect', onConnect)
+        socket.off('disconnect', onDisconnect)
+        socket.off('joined', onJoined)
+        socket.off('game-state', onGameState)
+        socket.off('chat-broadcast', onChatBroadcast)
+        socket.off('error', onError)
+        socket.off('hand-result', onHandResult)
+        socket.disconnect()
+      }
+    })()
 
     return () => {
-      socket.off('connect', onConnect)
-      socket.off('disconnect', onDisconnect)
-      socket.off('joined', onJoined)
-      socket.off('game-state', onGameState)
-      socket.off('chat-broadcast', onChatBroadcast)
-      socket.off('error', onError)
-      socket.off('hand-result', onHandResult)
-      socket.disconnect()
+      isCancelled = true
+      if (detachListeners) {
+        detachListeners()
+      }
+      if (socketRef.current) {
+        socketRef.current = null
+      }
+      setIsConnected(false)
     }
   }, [gameId])
 

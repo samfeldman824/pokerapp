@@ -1,11 +1,9 @@
 {
-  "active_plan": "/Users/samfeldman/Code/pokerapp/.sisyphus/plans/gameplay-enhancements.md",
-  "started_at": "2026-03-09T04:29:23.037Z",
+  "active_plan": "/Users/samfeldman/Code/pokerapp/.sisyphus/plans/community-card-animations.md",
+  "started_at": "2026-03-15T16:27:30.347Z",
   "session_ids": [
-    "ses_32f24a32effeeujqBSueXzudY2",
-    "ses_32efc8073ffenB3sUreOWRZ8sI"
+    "ses_30dad0565ffe5tkQU8FplFWKu5"
   ],
-  "plan_name": "gameplay-enhancements",
-  "agent": "atlas",
-  "worktree_path": "/Users/samfeldman/Code/pokerapp"
+  "plan_name": "community-card-animations",
+  "agent": "atlas"
 }
