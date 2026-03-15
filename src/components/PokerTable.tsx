@@ -71,7 +71,7 @@ export function PokerTable({ gameState, playerId, onAction, actionConfirmation, 
           <div key={`pot-${lastHandResult?.handNumber}`} className={hasWonPot ? "animate-pot-win" : ""}>
             <PotDisplay pot={gameState.pot} sidePots={gameState.sidePots} />
           </div>
-          <CommunityCards cards={gameState.communityCards} phase={gameState.phase} />
+          <CommunityCards cards={gameState.communityCards} phase={gameState.phase} handNumber={gameState.handNumber} />
         </div>
 
         {Array.from({ length: maxSeats }).map((_, i) => {

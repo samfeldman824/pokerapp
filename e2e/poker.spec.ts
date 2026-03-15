@@ -1,4 +1,4 @@
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { test, expect, BrowserContext, Page } from '@playwright/test';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -40,22 +40,61 @@ async function joinGame(
   await expect(page.getByLabel('Display Name')).not.toBeVisible({ timeout: 15000 });
 }
 
-async function waitForActionBar(page: Page): Promise<void> {
-  // ActionBar appears at the bottom when it's this player's turn
-  await page.waitForSelector(
-    'button:text("Fold"), button:text("Check"), button:text("Call")',
-    { timeout: 20000 },
-  );
+function communityCardSlotSelector(
+  index: number,
+  cardState: 'revealed' | 'expected' | 'empty',
+  revealState: 'entering' | 'settled' | 'idle',
+): string {
+  return `[data-testid="community-card-slot-${index}"][data-card-state="${cardState}"][data-reveal-state="${revealState}"]`;
+}
+
+function communityCardSlot(page: Page, index: number) {
+  return page.getByTestId(`community-card-slot-${index}`);
+}
+
+async function waitForCommunityCardState(
+  page: Page,
+  index: number,
+  cardState: 'revealed' | 'expected' | 'empty',
+  revealState: 'entering' | 'settled' | 'idle',
+  timeout: number,
+): Promise<void> {
+  await page.waitForSelector(communityCardSlotSelector(index, cardState, revealState), { timeout });
+}
+
+async function expectCommunityCardState(
+  page: Page,
+  index: number,
+  cardState: 'revealed' | 'expected' | 'empty',
+  revealState: 'entering' | 'settled' | 'idle',
+): Promise<void> {
+  await expect(communityCardSlot(page, index)).toHaveAttribute('data-card-state', cardState);
+  await expect(communityCardSlot(page, index)).toHaveAttribute('data-reveal-state', revealState);
+}
+
+async function isCommunityCardStateVisible(
+  page: Page,
+  index: number,
+  cardState: 'revealed' | 'expected' | 'empty',
+  revealState: 'entering' | 'settled' | 'idle',
+): Promise<boolean> {
+  return page
+    .waitForSelector(communityCardSlotSelector(index, cardState, revealState), { timeout: 200 })
+    .then(() => true)
+    .catch(() => false);
 }
 
 // ---------------------------------------------------------------------------
 // Test 1: Full 2-player hand with UI evidence capture
 // ---------------------------------------------------------------------------
-test('two players can join, start a game, and complete a hand', async ({ browser }) => {
+test('community board reveal settles through river', async ({ browser }) => {
+  test.setTimeout(90000);
   const ctx1: BrowserContext = await browser.newContext();
   const ctx2: BrowserContext = await browser.newContext();
   const hostPage: Page = await ctx1.newPage();
   const guestPage: Page = await ctx2.newPage();
+  const flopSettleTimeout = 1000;
+  const turnRiverSettleTimeout = 800;
 
   try {
     // Host creates game
@@ -77,6 +116,12 @@ test('two players can join, start a game, and complete a hand', async ({ browser
     // ===== PREFLOP STATE: Before community cards dealt =====
     // Verify hole cards are visible (player's own cards)
     await hostPage.waitForTimeout(1000);
+
+    const communityCards = hostPage.getByTestId('community-cards');
+    await expect(communityCards).toBeVisible({ timeout: 5000 });
+    for (const slotIndex of [0, 1, 2, 3, 4]) {
+      await expectCommunityCardState(hostPage, slotIndex, 'empty', 'idle');
+    }
     
     // Verify action bar exists (betting is happening)
     const actionBarExists = await hostPage.getByRole('button', { name: /fold|check|call|raise|all-in/i }).count();
@@ -88,66 +133,95 @@ test('two players can join, start a game, and complete a hand', async ({ browser
     // Progress game state by taking actions until hand completion
     let actionsCount = 0;
     let activeHandCaptured = false;
-    
-    for (let i = 0; i < 20; i++) {
-      const hostFold = hostPage.getByRole('button', { name: /^fold$/i });
-      const hostCheck = hostPage.getByRole('button', { name: /^check$/i });
-      const hostCall = hostPage.getByRole('button', { name: /^call/i });
-      const guestFold = guestPage.getByRole('button', { name: /^fold$/i });
-      const guestCheck = guestPage.getByRole('button', { name: /^check$/i });
-      const guestCall = guestPage.getByRole('button', { name: /^call/i });
 
-      // ===== ACTIVE HAND STATE: Cards visible, betting happening =====
-      // Capture after first real action to show active hand state
-      if (actionsCount === 1 && !activeHandCaptured) {
-        await hostPage.screenshot({ path: '.sisyphus/evidence/task-6-active-hand.png' });
-        activeHandCaptured = true;
+    const actOnce = async (): Promise<void> => {
+      const preferredActions = [
+        hostPage.getByRole('button', { name: /^check/i }),
+        hostPage.getByRole('button', { name: /^call/i }),
+        hostPage.getByRole('button', { name: /^fold/i }),
+        guestPage.getByRole('button', { name: /^check/i }),
+        guestPage.getByRole('button', { name: /^call/i }),
+        guestPage.getByRole('button', { name: /^fold/i }),
+      ];
+
+      for (const action of preferredActions) {
+        if (await action.isEnabled()) {
+          await action.click();
+          actionsCount++;
+
+          if (actionsCount === 1 && !activeHandCaptured) {
+            await hostPage.screenshot({ path: '.sisyphus/evidence/task-6-active-hand.png' });
+            activeHandCaptured = true;
+          }
+
+          await hostPage.waitForTimeout(150);
+          return;
+        }
       }
 
-      // Act on whichever player has the action
-      if (await hostFold.isVisible()) {
-        await hostFold.click();
-        actionsCount++;
-      } else if (await hostCheck.isVisible()) {
-        await hostCheck.click();
-        actionsCount++;
-      } else if (await hostCall.isVisible()) {
-        await hostCall.click();
-        actionsCount++;
-      } else if (await guestFold.isVisible()) {
-        await guestFold.click();
-        actionsCount++;
-      } else if (await guestCheck.isVisible()) {
-        await guestCheck.click();
-        actionsCount++;
-      } else if (await guestCall.isVisible()) {
-        await guestCall.click();
-        actionsCount++;
-      } else {
-        // No action visible — wait briefly
-        await hostPage.waitForTimeout(400);
+      await hostPage.waitForTimeout(150);
+    };
+
+    const advanceUntil = async (description: string, predicate: () => Promise<boolean>): Promise<void> => {
+      for (let step = 0; step < 24; step++) {
+        if (await predicate()) {
+          return;
+        }
+        await actOnce();
       }
 
-      await hostPage.waitForTimeout(200);
+      throw new Error(`Timed out advancing hand before ${description}`);
+    };
 
-      // Check if hand has completed (showdown results visible or waiting for new hand)
+    await advanceUntil('flop expected placeholder', () =>
+      isCommunityCardStateVisible(hostPage, 2, 'expected', 'idle'),
+    );
+    await expectCommunityCardState(hostPage, 2, 'expected', 'idle');
+
+    await waitForCommunityCardState(hostPage, 0, 'revealed', 'settled', flopSettleTimeout);
+    await waitForCommunityCardState(hostPage, 1, 'revealed', 'settled', flopSettleTimeout);
+    await waitForCommunityCardState(hostPage, 2, 'revealed', 'settled', flopSettleTimeout);
+    await expectCommunityCardState(hostPage, 0, 'revealed', 'settled');
+    await expectCommunityCardState(hostPage, 1, 'revealed', 'settled');
+    await expectCommunityCardState(hostPage, 2, 'revealed', 'settled');
+    await expectCommunityCardState(hostPage, 3, 'empty', 'idle');
+    await expectCommunityCardState(hostPage, 4, 'empty', 'idle');
+    await hostPage.screenshot({ path: '.sisyphus/evidence/task-4-board-flop-settled.png' });
+
+    await advanceUntil('turn reveal entering state', () =>
+      isCommunityCardStateVisible(hostPage, 3, 'revealed', 'entering'),
+    );
+    await expectCommunityCardState(hostPage, 3, 'revealed', 'entering');
+    await waitForCommunityCardState(hostPage, 3, 'revealed', 'settled', turnRiverSettleTimeout);
+    await expectCommunityCardState(hostPage, 0, 'revealed', 'settled');
+    await expectCommunityCardState(hostPage, 1, 'revealed', 'settled');
+    await expectCommunityCardState(hostPage, 2, 'revealed', 'settled');
+    await expectCommunityCardState(hostPage, 3, 'revealed', 'settled');
+    await expectCommunityCardState(hostPage, 4, 'empty', 'idle');
+
+    await advanceUntil('river reveal entering state', () =>
+      isCommunityCardStateVisible(hostPage, 4, 'revealed', 'entering'),
+    );
+    await expectCommunityCardState(hostPage, 4, 'revealed', 'entering');
+    await waitForCommunityCardState(hostPage, 4, 'revealed', 'settled', turnRiverSettleTimeout);
+    await expectCommunityCardState(hostPage, 0, 'revealed', 'settled');
+    await expectCommunityCardState(hostPage, 1, 'revealed', 'settled');
+    await expectCommunityCardState(hostPage, 2, 'revealed', 'settled');
+    await expectCommunityCardState(hostPage, 3, 'revealed', 'settled');
+    await expectCommunityCardState(hostPage, 4, 'revealed', 'settled');
+    await hostPage.screenshot({ path: '.sisyphus/evidence/task-4-board-full-settled.png' });
+
+    await advanceUntil('hand completion', async () => {
       const hostShowdown = await hostPage.getByText('Showdown Results').count();
       const guestShowdown = await guestPage.getByText('Showdown Results').count();
       const hostWaiting = await hostPage.getByText(/waiting for host/i).count();
       const guestWaiting = await guestPage.getByText(/waiting for host/i).count();
 
-      if (hostShowdown + guestShowdown > 0 || hostWaiting + guestWaiting > 0) {
-        break;
-      }
-    }
+      return hostShowdown + guestShowdown + hostWaiting + guestWaiting > 0;
+    });
 
     // ===== BOARD VISIBLE STATE: Community cards showing (flop/turn/river) =====
-    // Wait for community cards to be visible before capturing
-    await expect(hostPage.locator('[data-testid="community-cards"], .community-cards')).toBeVisible({ timeout: 5000 }).catch(() => {
-      // Community cards may not always be present (e.g., if hand ended preflop)
-      // Continue with screenshot regardless
-    });
-    await hostPage.screenshot({ path: '.sisyphus/evidence/task-6-board-visible.png' });
+    await expect(communityCards).toBeVisible({ timeout: 5000 });
 
     // Verify the hand actually completed - either showdown results or waiting for new hand
     const hostShowdownFinal = await hostPage.getByText('Showdown Results').count();
@@ -253,7 +327,7 @@ test('host can pause and resume the game', async ({ browser }) => {
 // ---------------------------------------------------------------------------
 // Test 4: Join flow edge cases
 // ---------------------------------------------------------------------------
-test('game page loads correctly and handles invalid game IDs', async ({ page }) => {
+test('game page loads correctly and rejects invalid game IDs', async ({ page }) => {
   // 4a: Valid game page loads
   const gameId = await createGame(page);
   await page.goto(`/game/${gameId}`);
@@ -267,7 +341,7 @@ test('game page loads correctly and handles invalid game IDs', async ({ page }) 
   expect(gameNotFound + returnHome).toBeGreaterThan(0);
 });
 
-test('all-in: opponent sees an enabled Call button and can complete the hand', async ({ browser }) => {
+test('all-in: opponent sees an enabled Call button and can finish the round', async ({ browser }) => {
   const ctx1: BrowserContext = await browser.newContext();
   const ctx2: BrowserContext = await browser.newContext();
   const alicePage: Page = await ctx1.newPage();
@@ -280,12 +354,17 @@ test('all-in: opponent sees an enabled Call button and can complete the hand', a
     await alicePage.getByRole('button', { name: /start game/i }).click();
     await expect(alicePage.getByText(/waiting for host/i)).not.toBeVisible({ timeout: 15000 });
 
-    await alicePage.waitForSelector('button:text("Fold")', { timeout: 15000 });
-    await alicePage.locator('button:text("All-in")').click();
-    await alicePage.locator('button:text("Raise")').click();
+    const aliceRaise = alicePage.getByRole('button', { name: /^raise/i });
+    const aliceAllIn = alicePage.getByRole('button', { name: /^all-in/i });
+    await expect(aliceRaise).toBeEnabled({ timeout: 15000 });
+    await aliceRaise.click();
+    await expect(aliceAllIn).toBeEnabled({ timeout: 5000 });
+    await aliceAllIn.click();
+    await expect(aliceRaise).toBeEnabled({ timeout: 5000 });
+    await aliceRaise.click();
 
-    await bobPage.waitForSelector('button:text("Call")', { timeout: 15000 });
-    const callButton = bobPage.locator('button:text("Call")').first();
+    const callButton = bobPage.getByRole('button', { name: /^call/i }).first();
+    await expect(callButton).toBeVisible({ timeout: 15000 });
     await expect(callButton).toBeEnabled();
 
     await callButton.click();
