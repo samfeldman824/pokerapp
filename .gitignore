@@ -8,3 +8,6 @@ drizzle/
 .sisyphus/notepads/
 .sisyphus/boulder.json
 test-results/*
+.sisyphus/boulder.json
+test-results/.last-run.json
+.vscode/settings.json
