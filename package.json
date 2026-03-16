@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "tsx watch server.ts",
     "build": "next build",
-    "start": "npx tsx server.ts",
+    "start": "tsx server.ts",
+    "db:push": "drizzle-kit push",
     "type-check": "tsc --noEmit",
     "lint": "next lint",
     "test": "vitest run",
