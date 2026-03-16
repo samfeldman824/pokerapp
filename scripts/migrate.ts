@@ -1,4 +1,4 @@
-import { Pool } from 'pg'
+import { Pool, type PoolClient } from 'pg'
 
 const TABLES = [
   `CREATE TABLE IF NOT EXISTS games (
@@ -52,7 +52,7 @@ const TABLES = [
   )`,
 ]
 
-async function createTables(client: Awaited<ReturnType<Pool['connect']>>) {
+async function createTables(client: PoolClient) {
   for (const sql of TABLES) {
     await client.query(sql)
   }
