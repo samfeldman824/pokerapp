@@ -6,7 +6,7 @@
     "dev": "tsx watch server.ts",
     "build": "next build",
     "start": "bun server.ts",
-    "migrate": "NODE_TLS_REJECT_UNAUTHORIZED=0 drizzle-kit push:pg",
+    "migrate": "bun scripts/migrate.ts",
     "type-check": "tsc --noEmit",
     "lint": "next lint",
     "test": "vitest run",
