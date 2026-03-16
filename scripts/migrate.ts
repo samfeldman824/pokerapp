@@ -53,6 +53,73 @@ const TABLES = [
   )`,
 ]
 
+const REQUIRED_TABLES = ['games', 'players', 'hands', 'hand_actions', 'hand_results'] as const
+
+const REQUIRED_TABLE_COLUMNS: Record<(typeof REQUIRED_TABLES)[number], readonly string[]> = {
+  games: ['id', 'config', 'status', 'created_at'],
+  players: ['id', 'game_id', 'display_name', 'seat_index', 'token'],
+  hands: ['id', 'game_id', 'hand_number', 'dealer_seat_index', 'community_cards', 'pot_total'],
+  hand_actions: ['id', 'hand_id', 'player_id', 'phase', 'action_type', 'ordering'],
+  hand_results: ['id', 'hand_id', 'player_id', 'winnings'],
+}
+
+type DbInfoRow = {
+  current_user: string
+  current_database: string
+  can_create_in_public: boolean
+  can_create_schema: boolean
+}
+
+type SchemaPermissionRow = {
+  nspname: string
+  can_create: boolean
+}
+
+type ResolvedTableRow = {
+  table_name: (typeof REQUIRED_TABLES)[number]
+  schema_name: string | null
+}
+
+async function hasCompatibleExistingSchema(client: PoolClient): Promise<boolean> {
+  const { rows: resolvedTables } = await client.query<ResolvedTableRow>(
+    `
+      SELECT
+        names.table_name,
+        n.nspname AS schema_name
+      FROM unnest($1::text[]) AS names(table_name)
+      LEFT JOIN pg_class c ON c.oid = to_regclass(names.table_name)
+      LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
+    `,
+    [REQUIRED_TABLES]
+  )
+
+  for (const tableName of REQUIRED_TABLES) {
+    const resolved = resolvedTables.find((row) => row.table_name === tableName)
+    if (!resolved?.schema_name) {
+      return false
+    }
+
+    const { rows: columnRows } = await client.query<{ column_name: string }>(
+      `
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = $1
+          AND table_name = $2
+      `,
+      [resolved.schema_name, tableName]
+    )
+
+    const columns = new Set(columnRows.map((row) => row.column_name))
+    for (const requiredColumn of REQUIRED_TABLE_COLUMNS[tableName]) {
+      if (!columns.has(requiredColumn)) {
+        return false
+      }
+    }
+  }
+
+  return true
+}
+
 async function createTables(client: PoolClient) {
   for (const sql of TABLES) {
     await client.query(sql)
@@ -72,25 +139,27 @@ async function main() {
   const client = await pool.connect()
   try {
     // Diagnostics: understand the user and available schemas
-    const info = await client.query(`
+    const infoResult = await client.query<DbInfoRow>(`
       SELECT
         current_user,
         current_database(),
         has_schema_privilege(current_user, 'public', 'CREATE') AS can_create_in_public,
         has_database_privilege(current_user, current_database(), 'CREATE') AS can_create_schema
     `)
-    console.log('DB info:', JSON.stringify(info.rows[0]))
+    const info = infoResult.rows[0]
+    console.log('DB info:', JSON.stringify(info))
 
-    const schemas = await client.query(`
+    const schemasResult = await client.query<SchemaPermissionRow>(`
       SELECT nspname, has_schema_privilege(current_user, nspname, 'CREATE') AS can_create
       FROM pg_namespace
       WHERE nspname NOT LIKE 'pg_%' AND nspname != 'information_schema'
       ORDER BY nspname
     `)
-    console.log('Schemas:', JSON.stringify(schemas.rows))
+    const schemas = schemasResult.rows
+    console.log('Schemas:', JSON.stringify(schemas))
 
     // Strategy 1: try public schema directly
-    if (info.rows[0].can_create_in_public) {
+    if (info.can_create_in_public) {
       console.log('Using public schema')
       await createTables(client)
       console.log('Migration complete (public schema)')
@@ -98,9 +167,9 @@ async function main() {
     }
 
     // Strategy 2: try the user's own schema ("$user" search_path)
-    const currentUser = info.rows[0].current_user as string
-    const userSchemaResult = schemas.rows.find(
-      (r: any) => r.nspname === currentUser && r.can_create
+    const currentUser = info.current_user
+    const userSchemaResult = schemas.find(
+      (schema) => schema.nspname === currentUser && schema.can_create
     )
     if (userSchemaResult) {
       console.log(`Using "${currentUser}" schema`)
@@ -111,7 +180,7 @@ async function main() {
     }
 
     // Strategy 3: find any writable schema
-    const writableSchema = schemas.rows.find((r: any) => r.can_create)
+    const writableSchema = schemas.find((schema) => schema.can_create)
     if (writableSchema) {
       console.log(`Using "${writableSchema.nspname}" schema`)
       await client.query(`SET search_path TO "${writableSchema.nspname}"`)
@@ -121,12 +190,17 @@ async function main() {
     }
 
     // Strategy 4: try creating our own schema
-    if (info.rows[0].can_create_schema) {
+    if (info.can_create_schema) {
       console.log('Creating "app" schema')
       await client.query('CREATE SCHEMA IF NOT EXISTS app')
       await client.query('SET search_path TO app')
       await createTables(client)
       console.log('Migration complete ("app" schema)')
+      return
+    }
+
+    if (await hasCompatibleExistingSchema(client)) {
+      console.log('No writable schema, but compatible tables already exist. Skipping migration.')
       return
     }
 
