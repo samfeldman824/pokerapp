@@ -1,4 +1,5 @@
 import { Pool, type PoolClient } from 'pg'
+import { normalizeDatabaseUrl } from '../src/db/connection-string'
 
 const TABLES = [
   `CREATE TABLE IF NOT EXISTS games (
@@ -59,8 +60,13 @@ async function createTables(client: PoolClient) {
 }
 
 async function main() {
+  const connectionString = process.env.DATABASE_URL
+  if (!connectionString) {
+    throw new Error('DATABASE_URL is required for migrations')
+  }
+
   const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: normalizeDatabaseUrl(connectionString),
   })
 
   const client = await pool.connect()
