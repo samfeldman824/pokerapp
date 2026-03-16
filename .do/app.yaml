@@ -1,0 +1,26 @@
+name: pokerapp
+
+services:
+  - name: web
+    github:
+      repo: samfeldman824/pokerapp   # ← replace with your repo
+      branch: main
+      deploy_on_push: true
+    build_command: npm install && npm run build
+    run_command: npm start
+    http_port: 8080
+    instance_size_slug: basic-xxs
+    instance_count: 1
+    envs:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        value: ${pokerapp-db.DATABASE_URL}   # bound from managed DB below
+
+databases:
+  - name: pokerapp-db
+    engine: PG
+    version: "15"
+    size: db-s-dev-database
+    num_nodes: 1
