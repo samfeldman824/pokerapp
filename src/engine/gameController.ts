@@ -543,28 +543,21 @@ export function handleAction(game: GameState, playerId: string, action: PlayerAc
       return getShowdownResults(appliedGame)
     }
 
-    let currentInternalGame = appliedInternalGame
-    let currentGame = appliedGame
+    // Advance exactly one street. If there is an active player after advancing
+    // (e.g. only one player was all-in, others can still act) return normally.
+    // If not (full runout), return the intermediate state with activePlayerIndex=-1
+    // so the socket handler can schedule the remaining streets with delays,
+    // giving clients a chance to see each street dealt progressively.
+    const advancedInternalGame = advancePhase(appliedInternalGame)
+    const advancedGame = fromInternalGame(appliedGame, advancedInternalGame)
+    const nextActive = getNextActivePlayer(toInternalGame(advancedGame))
 
-    while (currentGame.phase !== GamePhase.River) {
-      const advancedInternalGame = advancePhase(currentInternalGame)
-      const advancedGame = fromInternalGame(currentGame, advancedInternalGame)
-      const nextActive = getNextActivePlayer(toInternalGame(advancedGame))
-
-      if (nextActive !== -1) {
-        return {
-          ...advancedGame,
-          activePlayerIndex: nextActive,
-          timerStart: null,
-          actionTimerStart: null,
-        }
-      }
-
-      currentInternalGame = advancedInternalGame
-      currentGame = advancedGame
+    return {
+      ...advancedGame,
+      activePlayerIndex: nextActive,
+      timerStart: null,
+      actionTimerStart: null,
     }
-
-    return getShowdownResults(currentGame)
   }
 
   return {
@@ -581,6 +574,30 @@ export function handleAction(game: GameState, playerId: string, action: PlayerAc
  */
 export function isHandComplete(game: GameState): boolean {
   return game.phase === GamePhase.Showdown || getRemainingPlayers(game).length <= 1
+}
+
+/**
+ * Advances the game one street during a board runout (all players all-in).
+ *
+ * Called repeatedly by the socket handler with delays between each call so
+ * clients see community cards dealt progressively. When called on the River,
+ * returns the final showdown result with the pot awarded.
+ */
+export function advanceRunout(game: GameState): GameState {
+  if (game.phase === GamePhase.River) {
+    return getShowdownResults(game)
+  }
+
+  const internalGame = toInternalGame(game)
+  const advancedInternal = advancePhase(internalGame)
+  const advancedGame = fromInternalGame(game, advancedInternal)
+
+  return {
+    ...advancedGame,
+    activePlayerIndex: -1,
+    timerStart: null,
+    actionTimerStart: null,
+  }
 }
 
 /**

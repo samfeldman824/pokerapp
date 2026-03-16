@@ -29,6 +29,7 @@ import { Server, Socket } from 'socket.io'
 import { randomUUID } from 'crypto'
 
 import {
+  advanceRunout,
   getPlayerView,
   getShowdownResults,
   handleAction,
@@ -92,9 +93,13 @@ const disconnectTimers: Map<string, NodeJS.Timeout> = new Map()
 /** Per-game delay before automatically starting the next hand after showdown. */
 const nextHandTimers: Map<string, NodeJS.Timeout> = new Map()
 
+/** Per-game timers for advancing community cards one street at a time during all-in runouts. */
+const runoutTimers: Map<string, NodeJS.Timeout> = new Map()
+
 const chatRateLimits = new Map<string, { count: number; windowStart: number }>()
 
 const DISCONNECT_AUTO_FOLD_DELAY_MS = 30_000
+const RUNOUT_DELAY_MS = process.env.NODE_ENV === 'test' ? 50 : 1500
 const CHAT_RATE_LIMIT_WINDOW_MS = 10_000
 const CHAT_RATE_LIMIT_MAX_MESSAGES = 5
 const CHAT_MAX_CUSTOM_MESSAGE_LENGTH = 200
@@ -183,6 +188,16 @@ function clearNextHandTimer(gameId: string): void {
   }
 }
 
+/** Cancels and removes the board runout timer for a game (if any). */
+function clearRunoutTimer(gameId: string): void {
+  const timer = runoutTimers.get(gameId)
+
+  if (timer) {
+    clearTimeout(timer)
+    runoutTimers.delete(gameId)
+  }
+}
+
 /**
  * Schedules automatic start of the next hand after the game's configured delay.
  *
@@ -222,6 +237,42 @@ function scheduleNextHand(io: Server, gameId: string): void {
   }, nextHandDelayMs)
 
   nextHandTimers.set(gameId, timer)
+}
+
+function scheduleRunoutAdvance(io: Server, gameId: string): void {
+  clearRunoutTimer(gameId)
+
+  const timer = setTimeout(() => {
+    void advanceRunoutLocked(io, gameId)
+  }, RUNOUT_DELAY_MS)
+
+  runoutTimers.set(gameId, timer)
+}
+
+async function advanceRunoutLocked(io: Server, gameId: string): Promise<void> {
+  await gameStore.withLock(gameId, async () => {
+    try {
+      const game = gameStore.get(gameId)
+
+      if (!game || game.isPaused) return
+
+      const nextGame = advanceRunout(game)
+      gameStore.set(nextGame.id, nextGame)
+      await saveGame(nextGame)
+
+      if (isHandComplete(nextGame)) {
+        const handResultEvent = await persistCompletedHand(gameId, game, nextGame)
+        scheduleNextHand(io, gameId)
+        await emitHandResult(io, handResultEvent)
+      } else {
+        scheduleRunoutAdvance(io, gameId)
+      }
+
+      await broadcastGameState(io, nextGame)
+    } catch (err) {
+      console.error(`[runout] ${gameId}: error in advanceRunoutLocked:`, err)
+    }
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -725,6 +776,8 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
           handResultEvent = await persistCompletedHand(payload.gameId, game, resolvedGame)
           nextGame = resolvedGame
           scheduleNextHand(io, payload.gameId)
+        } else if (nextGame.activePlayerIndex === -1) {
+          scheduleRunoutAdvance(io, payload.gameId)
         }
 
         nextGame = scheduleActionTimer(io, nextGame)

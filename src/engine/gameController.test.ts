@@ -93,7 +93,7 @@ describe('gameController', () => {
     expect(afterCall.phase).not.toBe(GamePhase.Preflop)
   })
 
-  it('handleAction() runs board out automatically when only one player is not all-in after preflop', () => {
+  it('handleAction() advances to flop (not showdown) when only one player is not all-in after preflop', () => {
     const lobby = makeGame({ playerCount: 3 })
     const started = startHand(lobby)
     const p0 = bySeat(started, 0)
@@ -116,12 +116,12 @@ describe('gameController', () => {
 
     const result = handleAction(setupGame, p2.id, { type: ActionType.Call })
 
-    expect(result.phase).toBe(GamePhase.Showdown)
+    expect(result.phase).toBe(GamePhase.Flop)
     expect(result.activePlayerIndex).toBe(-1)
-    expect(result.communityCards).toHaveLength(5)
+    expect(result.communityCards).toHaveLength(3)
   })
 
-  it('handleAction() runs board out when player goes all-in on flop and is called by bigger stack', () => {
+  it('handleAction() advances to turn (not showdown) when player goes all-in on flop and is called by bigger stack', () => {
     const lobby = makeGame({ playerCount: 2 })
     const started = startHand(lobby)
     const p0 = bySeat(started, 0)
@@ -149,12 +149,12 @@ describe('gameController', () => {
 
     const result = handleAction(afterAllIn, p1.id, { type: ActionType.Call })
 
-    expect(result.phase).toBe(GamePhase.Showdown)
+    expect(result.phase).toBe(GamePhase.Turn)
     expect(result.activePlayerIndex).toBe(-1)
-    expect(result.communityCards).toHaveLength(5)
+    expect(result.communityCards).toHaveLength(4)
   })
 
-  it('handleAction() runs board out via real flow: preflop call, flop all-in, bigger stack calls', () => {
+  it('handleAction() advances to turn via real flow: preflop call, flop all-in, bigger stack calls', () => {
     const lobby = makeGame({ playerCount: 2 })
     const started = startHand(lobby)
     const p0 = bySeat(started, 0)
@@ -178,12 +178,12 @@ describe('gameController', () => {
 
     const result = handleAction(afterFlopAllIn, secondActor.id, { type: ActionType.Call })
 
-    expect(result.phase).toBe(GamePhase.Showdown)
+    expect(result.phase).toBe(GamePhase.Turn)
     expect(result.activePlayerIndex).toBe(-1)
-    expect(result.communityCards).toHaveLength(5)
+    expect(result.communityCards).toHaveLength(4)
   })
 
-  it('handleAction() runs board out when mid-street fold leaves only one non-all-in player', () => {
+  it('handleAction() advances to turn (not showdown) when mid-flop fold leaves only one non-all-in player', () => {
     const lobby = makeGame({ playerCount: 3 })
     const started = startHand(lobby)
     const p0 = bySeat(started, 0)
@@ -209,12 +209,12 @@ describe('gameController', () => {
 
     const result = handleAction(flopGame, p0.id, { type: ActionType.Fold })
 
-    expect(result.phase).toBe(GamePhase.Showdown)
+    expect(result.phase).toBe(GamePhase.Turn)
     expect(result.activePlayerIndex).toBe(-1)
-    expect(result.communityCards).toHaveLength(5)
+    expect(result.communityCards).toHaveLength(4)
   })
 
-  it('handleAction() runs board out when player goes all-in on Turn and is called by bigger stack', () => {
+  it('handleAction() advances to river (not showdown) when player goes all-in on turn and is called by bigger stack', () => {
     const lobby = makeGame({ playerCount: 2 })
     const started = startHand(lobby)
     const p0 = bySeat(started, 0)
@@ -242,12 +242,12 @@ describe('gameController', () => {
 
     const result = handleAction(afterAllIn, p1.id, { type: ActionType.Call })
 
-    expect(result.phase).toBe(GamePhase.Showdown)
+    expect(result.phase).toBe(GamePhase.River)
     expect(result.activePlayerIndex).toBe(-1)
     expect(result.communityCards).toHaveLength(5)
   })
 
-  it('handleAction() runs board out when mid-Turn fold leaves only one non-all-in player', () => {
+  it('handleAction() advances to river (not showdown) when mid-turn fold leaves only one non-all-in player', () => {
     const lobby = makeGame({ playerCount: 3 })
     const started = startHand(lobby)
     const p0 = bySeat(started, 0)
@@ -273,7 +273,7 @@ describe('gameController', () => {
 
     const result = handleAction(turnGame, p0.id, { type: ActionType.Fold })
 
-    expect(result.phase).toBe(GamePhase.Showdown)
+    expect(result.phase).toBe(GamePhase.River)
     expect(result.activePlayerIndex).toBe(-1)
     expect(result.communityCards).toHaveLength(5)
   })
@@ -309,9 +309,9 @@ describe('gameController', () => {
 
     const result = handleAction(afterAllIn, flopP2.id, { type: ActionType.Call })
 
-    expect(result.phase).toBe(GamePhase.Showdown)
+    expect(result.phase).toBe(GamePhase.Turn)
     expect(result.activePlayerIndex).toBe(-1)
-    expect(result.communityCards).toHaveLength(5)
+    expect(result.communityCards).toHaveLength(4)
   })
 
   it('isHandComplete() false during preflop; true after showdown', () => {
@@ -579,3 +579,29 @@ describe('gameController', () => {
     expect(reset.config).toEqual(afterAction.config)
   })
 })
+
+  it('BUG REPRO: advances to flop (not showdown) when P0 goes all-in preflop and P1 calls with bigger stack', () => {
+    const lobby = makeGame({ playerCount: 2 })
+    const started = startHand(lobby)
+    const p0 = bySeat(started, 0)
+    const p1 = bySeat(started, 1)
+
+    const unequalGame: GameState = {
+      ...started,
+      currentBet: 2,
+      players: started.players.map(p => {
+        if (p.id === p0.id) return { ...p, chips: 49, bet: 1, totalBetThisHand: 1, isAllIn: false }
+        if (p.id === p1.id) return { ...p, chips: 198, bet: 2, totalBetThisHand: 2, isAllIn: false }
+        return p
+      }),
+    }
+
+    const afterAllIn = handleAction(unequalGame, p0.id, { type: ActionType.Raise, amount: 50 })
+    expect(afterAllIn.phase).toBe(GamePhase.Preflop)
+    expect(afterAllIn.activePlayerIndex).toBe(p1.seatIndex)
+
+    const afterCall = handleAction(afterAllIn, p1.id, { type: ActionType.Call })
+    expect(afterCall.phase).toBe(GamePhase.Flop)
+    expect(afterCall.activePlayerIndex).toBe(-1)
+    expect(afterCall.communityCards).toHaveLength(3)
+  })

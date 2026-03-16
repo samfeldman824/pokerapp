@@ -1127,7 +1127,7 @@ describe('registerSocketHandlers (integration)', () => {
     expect(err.message).toBe('Message cannot be empty')
   })
 
-  it('socket: board runs out to showdown when solo non-all-in player calls flop all-in', async () => {
+  it('socket: board runs out street-by-street to showdown when solo non-all-in player calls flop all-in', async () => {
     const gameId = seedGame({ betweenHandsDelay: 60 })
     gameIds.push(gameId)
 
@@ -1175,10 +1175,95 @@ describe('registerSocketHandlers (integration)', () => {
     expect(state.activePlayerIndex).not.toBe(-1)
 
     state = await act({ type: ActionType.Call })
-
-    expect(state.phase).toBe(GamePhase.Showdown)
+    expect(state.phase).toBe(GamePhase.Turn)
     expect(state.activePlayerIndex).toBe(-1)
-    expect(state.communityCards).toHaveLength(5)
+    expect(state.communityCards).toHaveLength(4)
+
+    const [riverState] = await Promise.all([
+      waitForEvent(host, 'game-state'),
+      waitForEvent(other, 'game-state'),
+    ])
+    expect(riverState.phase).toBe(GamePhase.River)
+    expect(riverState.communityCards).toHaveLength(5)
+
+    const [showdownState] = await Promise.all([
+      waitForEvent(host, 'game-state'),
+      waitForEvent(other, 'game-state'),
+    ])
+    expect(showdownState.phase).toBe(GamePhase.Showdown)
+    expect(showdownState.activePlayerIndex).toBe(-1)
+    expect(showdownState.communityCards).toHaveLength(5)
     void otherId
-  })
+  }, 15_000)
+
+  it('socket: board runs out street-by-street to showdown when preflop all-in is called by larger stack', async () => {
+    const gameId = seedGame({ betweenHandsDelay: 60 })
+    gameIds.push(gameId)
+
+    const host = createClient(port)
+    const other = createClient(port)
+    clients.push(host, other)
+
+    const { playerId: hostId } = await joinGame(host, gameId, 'Host', 0)
+    await waitForEvent(host, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    const { playerId: otherId } = await joinGame(other, gameId, 'Other', 3)
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    host.emit('start-game', { gameId, playerId: hostId })
+    let state = await waitForEvent(host, 'game-state')
+    await waitForEvent(other, 'game-state')
+
+    const liveGame = gameStore.get(gameId)!
+    const preflopActorId = findPlayerBySeat(state, state.activePlayerIndex).id
+    gameStore.set(gameId, {
+      ...liveGame,
+      players: liveGame.players.map((p) => (p.id === preflopActorId ? { ...p, chips: 49 } : p)),
+    })
+
+    const act = async (action: PlayerAction): Promise<ClientGameState> => {
+      const actingPlayer = findPlayerBySeat(state, state.activePlayerIndex)
+      const socket = actingPlayer.id === hostId ? host : other
+      const hostNext = waitForEvent(host, 'game-state')
+      const otherNext = waitForEvent(other, 'game-state')
+      socket.emit('player-action', { gameId, playerId: actingPlayer.id, action })
+      const [hostState] = await Promise.all([hostNext, otherNext])
+      state = hostState
+      return hostState
+    }
+
+    state = await act({ type: ActionType.Raise, amount: 50 })
+    expect(state.phase).toBe(GamePhase.Preflop)
+
+    state = await act({ type: ActionType.Call })
+    expect(state.phase).toBe(GamePhase.Flop)
+    expect(state.activePlayerIndex).toBe(-1)
+    expect(state.communityCards).toHaveLength(3)
+
+    const [turnState] = await Promise.all([
+      waitForEvent(host, 'game-state'),
+      waitForEvent(other, 'game-state'),
+    ])
+    expect(turnState.phase).toBe(GamePhase.Turn)
+    expect(turnState.communityCards).toHaveLength(4)
+
+    const [riverState] = await Promise.all([
+      waitForEvent(host, 'game-state'),
+      waitForEvent(other, 'game-state'),
+    ])
+    expect(riverState.phase).toBe(GamePhase.River)
+    expect(riverState.communityCards).toHaveLength(5)
+
+    const [showdownState] = await Promise.all([
+      waitForEvent(host, 'game-state'),
+      waitForEvent(other, 'game-state'),
+    ])
+    expect(showdownState.phase).toBe(GamePhase.Showdown)
+    expect(showdownState.activePlayerIndex).toBe(-1)
+    expect(showdownState.communityCards).toHaveLength(5)
+    void otherId
+  }, 15_000)
 })
