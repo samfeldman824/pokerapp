@@ -15,14 +15,11 @@ async function main() {
 
   const client = await pool.connect()
   try {
-    // PostgreSQL 15 revoked CREATE from the public schema by default.
-    // This succeeds when the app user is the database owner (member of pg_database_owner).
-    try {
-      await client.query('GRANT CREATE ON SCHEMA public TO CURRENT_USER')
-      console.log('Granted CREATE on public schema')
-    } catch (e: any) {
-      console.log('Note: could not grant schema permissions:', e.message)
-    }
+    // Create a dedicated schema owned by the current user.
+    // This avoids PostgreSQL 15's restriction that revoked CREATE on the public schema.
+    await client.query('CREATE SCHEMA IF NOT EXISTS app')
+    await client.query('SET search_path TO app')
+    console.log('Using schema: app')
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS games (

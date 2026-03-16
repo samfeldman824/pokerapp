@@ -24,6 +24,7 @@ function createPool() {
       user: dbUrl.username,
       password: dbUrl.password,
       ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+      options: '-c search_path=app',
     })
   } catch {
     // During `next build`, DATABASE_URL is a placeholder — create a pool that
