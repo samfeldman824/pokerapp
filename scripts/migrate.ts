@@ -75,84 +75,37 @@ type SchemaPermissionRow = {
   can_create: boolean
 }
 
-type TableColumnRow = {
-  table_schema: string
-  column_name: string
-}
-
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replace(/"/g, '""')}"`
 }
 
-async function findCompatibleExistingSchema(client: PoolClient): Promise<string | null> {
-  let compatibleSchemas: Set<string> | null = null
-
-  for (const tableName of REQUIRED_TABLES) {
-    const { rows } = await client.query<TableColumnRow>(
-      `
-        SELECT table_schema, column_name
-        FROM information_schema.columns
-        WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
-          AND table_name = $1
-      `,
-      [tableName]
-    )
-
-    const columnsBySchema = new Map<string, Set<string>>()
-    for (const row of rows) {
-      const schemaColumns = columnsBySchema.get(row.table_schema) ?? new Set<string>()
-      schemaColumns.add(row.column_name)
-      columnsBySchema.set(row.table_schema, schemaColumns)
-    }
-
-    const validSchemasForTable = new Set(
-      [...columnsBySchema.entries()]
-        .filter(([, columnSet]) =>
-          REQUIRED_TABLE_COLUMNS[tableName].every((requiredColumn) => columnSet.has(requiredColumn))
-        )
-        .map(([schemaName]) => schemaName)
-    )
-
-    if (validSchemasForTable.size === 0) {
-      console.log(`Compatibility check failed: no schema has required columns for table "${tableName}".`)
-      return null
-    }
-
-    if (compatibleSchemas === null) {
-      compatibleSchemas = validSchemasForTable
-      continue
-    }
-
-    compatibleSchemas = new Set(
-      [...compatibleSchemas].filter((schemaName) => validSchemasForTable.has(schemaName))
-    )
-
-    if (compatibleSchemas.size === 0) {
-      console.log('Compatibility check failed: required tables are spread across different schemas.')
-      return null
-    }
-  }
-
-  const selectedSchema = compatibleSchemas ? [...compatibleSchemas][0] : null
-  return selectedSchema ?? null
-}
-
 async function hasCompatibleExistingSchema(client: PoolClient): Promise<boolean> {
-  const compatibleSchema = await findCompatibleExistingSchema(client)
-  if (!compatibleSchema) {
-    return false
-  }
+  const searchPathResult = await client.query<{ search_path: string; current_schemas: string[] }>(`
+    SELECT
+      current_setting('search_path') AS search_path,
+      current_schemas(true) AS current_schemas
+  `)
+  const searchPath = searchPathResult.rows[0]
+  console.log('Compatibility probe search_path:', JSON.stringify(searchPath))
 
   for (const tableName of REQUIRED_TABLES) {
     const requiredColumns = REQUIRED_TABLE_COLUMNS[tableName]
       .map((columnName) => quoteIdentifier(columnName))
       .join(', ')
 
-    const query = `SELECT ${requiredColumns} FROM ${quoteIdentifier(compatibleSchema)}.${quoteIdentifier(tableName)} LIMIT 0`
-    await client.query(query)
+    const query = `SELECT ${requiredColumns} FROM ${quoteIdentifier(tableName)} LIMIT 0`
+    try {
+      await client.query(query)
+    } catch (error) {
+      console.log(
+        `Compatibility probe failed for table "${tableName}" using search_path (${searchPath.search_path}):`,
+        error
+      )
+      return false
+    }
   }
 
-  console.log(`Compatible non-writable schema found: "${compatibleSchema}".`)
+  console.log('Compatible read-only schema detected via runtime table probes.')
   return true
 }
 
