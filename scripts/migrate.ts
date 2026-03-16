@@ -55,6 +55,14 @@ const TABLES = [
 
 const REQUIRED_TABLES = ['games', 'players', 'hands', 'hand_actions', 'hand_results'] as const
 
+const REQUIRED_TABLE_COLUMNS: Record<(typeof REQUIRED_TABLES)[number], readonly string[]> = {
+  games: ['id', 'config', 'status', 'created_at'],
+  players: ['id', 'game_id', 'display_name', 'seat_index', 'token'],
+  hands: ['id', 'game_id', 'hand_number', 'dealer_seat_index', 'community_cards', 'pot_total'],
+  hand_actions: ['id', 'hand_id', 'player_id', 'phase', 'action_type', 'ordering'],
+  hand_results: ['id', 'hand_id', 'player_id', 'winnings'],
+}
+
 type DbInfoRow = {
   current_user: string
   current_database: string
@@ -67,27 +75,84 @@ type SchemaPermissionRow = {
   can_create: boolean
 }
 
-const COMPATIBILITY_QUERIES: Record<(typeof REQUIRED_TABLES)[number], string> = {
-  games: 'SELECT id, config, status, created_at FROM games LIMIT 0',
-  players: 'SELECT id, game_id, display_name, seat_index, token FROM players LIMIT 0',
-  hands:
-    'SELECT id, game_id, hand_number, dealer_seat_index, community_cards, pot_total FROM hands LIMIT 0',
-  hand_actions:
-    'SELECT id, hand_id, player_id, phase, action_type, ordering FROM hand_actions LIMIT 0',
-  hand_results: 'SELECT id, hand_id, player_id, winnings FROM hand_results LIMIT 0',
+type TableColumnRow = {
+  table_schema: string
+  column_name: string
 }
 
-async function hasCompatibleExistingSchema(client: PoolClient): Promise<boolean> {
+function quoteIdentifier(identifier: string): string {
+  return `"${identifier.replace(/"/g, '""')}"`
+}
+
+async function findCompatibleExistingSchema(client: PoolClient): Promise<string | null> {
+  let compatibleSchemas: Set<string> | null = null
+
   for (const tableName of REQUIRED_TABLES) {
-    const query = COMPATIBILITY_QUERIES[tableName]
-    try {
-      await client.query(query)
-    } catch {
-      return false
+    const { rows } = await client.query<TableColumnRow>(
+      `
+        SELECT table_schema, column_name
+        FROM information_schema.columns
+        WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+          AND table_name = $1
+      `,
+      [tableName]
+    )
+
+    const columnsBySchema = new Map<string, Set<string>>()
+    for (const row of rows) {
+      const schemaColumns = columnsBySchema.get(row.table_schema) ?? new Set<string>()
+      schemaColumns.add(row.column_name)
+      columnsBySchema.set(row.table_schema, schemaColumns)
+    }
+
+    const validSchemasForTable = new Set(
+      [...columnsBySchema.entries()]
+        .filter(([, columnSet]) =>
+          REQUIRED_TABLE_COLUMNS[tableName].every((requiredColumn) => columnSet.has(requiredColumn))
+        )
+        .map(([schemaName]) => schemaName)
+    )
+
+    if (validSchemasForTable.size === 0) {
+      console.log(`Compatibility check failed: no schema has required columns for table "${tableName}".`)
+      return null
+    }
+
+    if (compatibleSchemas === null) {
+      compatibleSchemas = validSchemasForTable
+      continue
+    }
+
+    compatibleSchemas = new Set(
+      [...compatibleSchemas].filter((schemaName) => validSchemasForTable.has(schemaName))
+    )
+
+    if (compatibleSchemas.size === 0) {
+      console.log('Compatibility check failed: required tables are spread across different schemas.')
+      return null
     }
   }
 
-  console.log('Compatible non-writable schema found via runtime table/column checks.')
+  const selectedSchema = compatibleSchemas ? [...compatibleSchemas][0] : null
+  return selectedSchema ?? null
+}
+
+async function hasCompatibleExistingSchema(client: PoolClient): Promise<boolean> {
+  const compatibleSchema = await findCompatibleExistingSchema(client)
+  if (!compatibleSchema) {
+    return false
+  }
+
+  for (const tableName of REQUIRED_TABLES) {
+    const requiredColumns = REQUIRED_TABLE_COLUMNS[tableName]
+      .map((columnName) => quoteIdentifier(columnName))
+      .join(', ')
+
+    const query = `SELECT ${requiredColumns} FROM ${quoteIdentifier(compatibleSchema)}.${quoteIdentifier(tableName)} LIMIT 0`
+    await client.query(query)
+  }
+
+  console.log(`Compatible non-writable schema found: "${compatibleSchema}".`)
   return true
 }
 
