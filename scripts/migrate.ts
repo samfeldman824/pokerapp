@@ -75,30 +75,62 @@ type SchemaPermissionRow = {
   can_create: boolean
 }
 
-type ResolvedTableRow = {
+type SearchPathRow = {
+  schemas: string[]
+}
+
+type ExistingTableRow = {
+  table_schema: string
   table_name: (typeof REQUIRED_TABLES)[number]
-  schema_name: string | null
 }
 
 async function hasCompatibleExistingSchema(client: PoolClient): Promise<boolean> {
-  const { rows: resolvedTables } = await client.query<ResolvedTableRow>(
+  const searchPathResult = await client.query<SearchPathRow>(
+    'SELECT current_schemas(true) AS schemas'
+  )
+  const searchPathSchemas = new Set(searchPathResult.rows[0]?.schemas ?? [])
+
+  const { rows: existingTables } = await client.query<ExistingTableRow>(
     `
       SELECT
-        names.table_name,
-        n.nspname AS schema_name
-      FROM unnest($1::text[]) AS names(table_name)
-      LEFT JOIN pg_class c ON c.oid = to_regclass(names.table_name)
-      LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
+        table_schema,
+        table_name
+      FROM information_schema.tables
+      WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+        AND table_name = ANY($1::text[])
+        AND table_type = 'BASE TABLE'
     `,
     [REQUIRED_TABLES]
   )
 
-  for (const tableName of REQUIRED_TABLES) {
-    const resolved = resolvedTables.find((row) => row.table_name === tableName)
-    if (!resolved?.schema_name) {
-      return false
-    }
+  const schemasWithAllTables = new Set<string>()
+  const tablesBySchema = new Map<string, Set<(typeof REQUIRED_TABLES)[number]>>()
 
+  for (const row of existingTables) {
+    const tables = tablesBySchema.get(row.table_schema) ?? new Set<(typeof REQUIRED_TABLES)[number]>()
+    tables.add(row.table_name)
+    tablesBySchema.set(row.table_schema, tables)
+  }
+
+  for (const [schemaName, tables] of tablesBySchema.entries()) {
+    const hasAllTables = REQUIRED_TABLES.every((tableName) => tables.has(tableName))
+    if (hasAllTables) {
+      schemasWithAllTables.add(schemaName)
+    }
+  }
+
+  const compatibleSchemas = [...schemasWithAllTables].filter((schemaName) =>
+    searchPathSchemas.has(schemaName)
+  )
+
+  if (compatibleSchemas.length === 0) {
+    return false
+  }
+
+  const compatibleSchema = compatibleSchemas[0]
+  console.log(`Checking compatible existing schema: "${compatibleSchema}"`)
+
+  for (const tableName of REQUIRED_TABLES) {
     const { rows: columnRows } = await client.query<{ column_name: string }>(
       `
         SELECT column_name
@@ -106,7 +138,7 @@ async function hasCompatibleExistingSchema(client: PoolClient): Promise<boolean>
         WHERE table_schema = $1
           AND table_name = $2
       `,
-      [resolved.schema_name, tableName]
+      [compatibleSchema, tableName]
     )
 
     const columns = new Set(columnRows.map((row) => row.column_name))
@@ -117,6 +149,9 @@ async function hasCompatibleExistingSchema(client: PoolClient): Promise<boolean>
     }
   }
 
+  console.log(
+    `Compatible non-writable schema found on search_path: "${compatibleSchema}" with required tables/columns.`
+  )
   return true
 }
 
