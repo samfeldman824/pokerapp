@@ -55,14 +55,6 @@ const TABLES = [
 
 const REQUIRED_TABLES = ['games', 'players', 'hands', 'hand_actions', 'hand_results'] as const
 
-const REQUIRED_TABLE_COLUMNS: Record<(typeof REQUIRED_TABLES)[number], readonly string[]> = {
-  games: ['id', 'config', 'status', 'created_at'],
-  players: ['id', 'game_id', 'display_name', 'seat_index', 'token'],
-  hands: ['id', 'game_id', 'hand_number', 'dealer_seat_index', 'community_cards', 'pot_total'],
-  hand_actions: ['id', 'hand_id', 'player_id', 'phase', 'action_type', 'ordering'],
-  hand_results: ['id', 'hand_id', 'player_id', 'winnings'],
-}
-
 type DbInfoRow = {
   current_user: string
   current_database: string
@@ -75,83 +67,27 @@ type SchemaPermissionRow = {
   can_create: boolean
 }
 
-type SearchPathRow = {
-  schemas: string[]
-}
-
-type ExistingTableRow = {
-  table_schema: string
-  table_name: (typeof REQUIRED_TABLES)[number]
+const COMPATIBILITY_QUERIES: Record<(typeof REQUIRED_TABLES)[number], string> = {
+  games: 'SELECT id, config, status, created_at FROM games LIMIT 0',
+  players: 'SELECT id, game_id, display_name, seat_index, token FROM players LIMIT 0',
+  hands:
+    'SELECT id, game_id, hand_number, dealer_seat_index, community_cards, pot_total FROM hands LIMIT 0',
+  hand_actions:
+    'SELECT id, hand_id, player_id, phase, action_type, ordering FROM hand_actions LIMIT 0',
+  hand_results: 'SELECT id, hand_id, player_id, winnings FROM hand_results LIMIT 0',
 }
 
 async function hasCompatibleExistingSchema(client: PoolClient): Promise<boolean> {
-  const searchPathResult = await client.query<SearchPathRow>(
-    'SELECT current_schemas(true) AS schemas'
-  )
-  const searchPathSchemas = new Set(searchPathResult.rows[0]?.schemas ?? [])
-
-  const { rows: existingTables } = await client.query<ExistingTableRow>(
-    `
-      SELECT
-        table_schema,
-        table_name
-      FROM information_schema.tables
-      WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
-        AND table_name = ANY($1::text[])
-        AND table_type = 'BASE TABLE'
-    `,
-    [REQUIRED_TABLES]
-  )
-
-  const schemasWithAllTables = new Set<string>()
-  const tablesBySchema = new Map<string, Set<(typeof REQUIRED_TABLES)[number]>>()
-
-  for (const row of existingTables) {
-    const tables = tablesBySchema.get(row.table_schema) ?? new Set<(typeof REQUIRED_TABLES)[number]>()
-    tables.add(row.table_name)
-    tablesBySchema.set(row.table_schema, tables)
-  }
-
-  for (const [schemaName, tables] of tablesBySchema.entries()) {
-    const hasAllTables = REQUIRED_TABLES.every((tableName) => tables.has(tableName))
-    if (hasAllTables) {
-      schemasWithAllTables.add(schemaName)
-    }
-  }
-
-  const compatibleSchemas = [...schemasWithAllTables].filter((schemaName) =>
-    searchPathSchemas.has(schemaName)
-  )
-
-  if (compatibleSchemas.length === 0) {
-    return false
-  }
-
-  const compatibleSchema = compatibleSchemas[0]
-  console.log(`Checking compatible existing schema: "${compatibleSchema}"`)
-
   for (const tableName of REQUIRED_TABLES) {
-    const { rows: columnRows } = await client.query<{ column_name: string }>(
-      `
-        SELECT column_name
-        FROM information_schema.columns
-        WHERE table_schema = $1
-          AND table_name = $2
-      `,
-      [compatibleSchema, tableName]
-    )
-
-    const columns = new Set(columnRows.map((row) => row.column_name))
-    for (const requiredColumn of REQUIRED_TABLE_COLUMNS[tableName]) {
-      if (!columns.has(requiredColumn)) {
-        return false
-      }
+    const query = COMPATIBILITY_QUERIES[tableName]
+    try {
+      await client.query(query)
+    } catch {
+      return false
     }
   }
 
-  console.log(
-    `Compatible non-writable schema found on search_path: "${compatibleSchema}" with required tables/columns.`
-  )
+  console.log('Compatible non-writable schema found via runtime table/column checks.')
   return true
 }
 
