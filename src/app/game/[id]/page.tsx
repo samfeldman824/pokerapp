@@ -653,13 +653,13 @@ export default function GamePage() {
                   Blinds: <span className="text-white font-medium">{currentBlindsInfo.smallBlind}/{currentBlindsInfo.bigBlind}</span>
                   <span className="ml-1 text-xs text-gray-500">· Next increase in {currentBlindsInfo.handsUntilIncrease} hand{currentBlindsInfo.handsUntilIncrease !== 1 && 's'}</span>
                 </span>
-                <span className="mx-2 text-gray-600">|</span>
+                <span className="mx-3 text-gray-600">|</span>
               </>
             )}
             <span>Players: <span className="text-white font-medium">{gameState?.players.filter(Boolean).length || gameInfo?.playerCount || 0}/{gameInfo?.maxPlayers || 0}</span></span>
             {(gameState?.spectators?.length ?? 0) > 0 && (
               <>
-                <span className="mx-2 text-gray-600">|</span>
+                <span className="mx-3 text-gray-600">|</span>
                 <span>Watching: <span className="text-white font-medium">{gameState?.spectators.length}</span></span>
               </>
             )}

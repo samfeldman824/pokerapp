@@ -59,7 +59,7 @@ export function InviteShare({ gameUrl, onClose }: InviteShareProps) {
           </button>
         </div>
 
-        <div className="px-6 py-8 flex flex-col items-center">
+        <div className="px-6 py-5 flex flex-col items-center">
           {qrCodeDataUrl ? (
             <div className="mb-8 rounded-2xl bg-white/5 p-4 border border-white/10 shadow-[0_0_30px_rgba(255,255,255,0.05)]">
               <img src={qrCodeDataUrl} alt="Game Invite QR Code" className="w-48 h-48" />
