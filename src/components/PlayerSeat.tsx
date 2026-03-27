@@ -3,6 +3,14 @@ import { ClientPlayerState, ActionType, Card } from '@/engine/types';
 import { evaluateHand } from '@/engine/handEvaluator';
 import { HoleCards } from './HoleCards';
 
+const AVATAR_SIZE = 80;
+const SEAT_OFFSETS = {
+  badge: AVATAR_SIZE + 8,       // 88px — avatar + gap
+  holeCards: AVATAR_SIZE,       // 80px — flush with avatar bottom
+  handStrength: AVATAR_SIZE + 46, // 126px — avatar + badge height
+  bet: AVATAR_SIZE + 55,        // 135px — avatar + badge + gap
+} as const;
+
 interface PlayerSeatProps {
   player: ClientPlayerState | null;
   seatIndex: number;
@@ -70,9 +78,16 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
         : '',
   ].join(' ');
 
+  const seatStyle = {
+    '--seat-badge': `${SEAT_OFFSETS.badge}px`,
+    '--seat-holes': `${SEAT_OFFSETS.holeCards}px`,
+    '--seat-hand': `${SEAT_OFFSETS.handStrength}px`,
+    '--seat-bet': `${SEAT_OFFSETS.bet}px`,
+  } as React.CSSProperties;
+
   const badgePositionClass = badgeAbove
-    ? 'bottom-[88px]'
-    : 'top-[88px]';
+    ? 'bottom-[var(--seat-badge)]'
+    : 'top-[var(--seat-badge)]';
 
   let actionText = '';
   let actionColor = 'bg-gray-900/70 border-gray-500';
@@ -109,7 +124,7 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
   }
 
   return (
-    <div className={seatClasses}>
+    <div className={seatClasses} style={seatStyle}>
       {isActive && (
         <div className="absolute -inset-3 rounded-full border-[3px] border-amber-400/80 animate-pulse shadow-[0_0_20px_rgba(251,191,36,0.6)] z-0" />
       )}
@@ -166,18 +181,18 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
         </span>
       </div>
 
-      <div className="absolute top-[80px] -right-[15px] z-20 scale-75 origin-top-left">
+      <div className="absolute top-[var(--seat-holes)] -right-[15px] z-20 scale-75 origin-top-left">
         <HoleCards cards={player.holeCards} isCurrentPlayer={isCurrentPlayer} isFolded={player.isFolded} />
       </div>
 
       {handStrength && (
-        <div className="absolute top-[126px] left-1/2 -translate-x-1/2 rounded-full border border-indigo-500/30 bg-indigo-950/70 px-3 py-1 text-[10px] font-semibold tracking-wide text-indigo-100 shadow-sm backdrop-blur-md z-20 whitespace-nowrap">
+        <div className="absolute top-[var(--seat-hand)] left-1/2 -translate-x-1/2 rounded-full border border-indigo-500/30 bg-indigo-950/70 px-3 py-1 text-[10px] font-semibold tracking-wide text-indigo-100 shadow-sm backdrop-blur-md z-20 whitespace-nowrap">
           {handStrength}
         </div>
       )}
 
       {player.bet > 0 && (
-        <div key={`bet-${player.bet}`} className={`animate-chip-bet absolute ${badgeAbove ? 'bottom-[135px]' : 'top-[135px]'} flex items-center gap-1.5 bg-slate-950/80 border border-emerald-500/30 rounded-full px-3 py-1 shadow-sm backdrop-blur-md whitespace-nowrap z-30 transform hover:scale-110 transition-transform`}>
+        <div key={`bet-${player.bet}`} className={`animate-chip-bet absolute ${badgeAbove ? 'bottom-[var(--seat-bet)]' : 'top-[var(--seat-bet)]'} flex items-center gap-1.5 bg-slate-950/80 border border-emerald-500/30 rounded-full px-3 py-1 shadow-sm backdrop-blur-md whitespace-nowrap z-30 transform hover:scale-110 transition-transform`}>
           <span className="text-emerald-500 text-sm">🪙</span>
           <span className="text-emerald-100 font-mono text-xs font-bold">{player.bet}</span>
         </div>
