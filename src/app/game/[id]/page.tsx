@@ -684,13 +684,13 @@ export default function GamePage() {
               onClick={() => setShowHandHistory(true)}
               className="px-4 py-1.5 bg-gray-800 hover:bg-gray-700 text-white text-sm font-medium rounded border border-gray-700 transition-colors"
             >
-              Hand History
+              Hand History <span className="ml-1.5 text-xs text-gray-500 font-normal">H</span>
             </button>
             <button
               onClick={() => setShowLedger(true)}
               className="px-4 py-1.5 bg-gray-800 hover:bg-gray-700 text-white text-sm font-medium rounded border border-gray-700 transition-colors"
             >
-              Session Ledger
+              Session Ledger <span className="ml-1.5 text-xs text-gray-500 font-normal">L</span>
             </button>
           </div>
 

@@ -51,6 +51,7 @@ export function ChatPanel({
         className="fixed bottom-6 right-6 z-50 flex items-center justify-center rounded-full bg-indigo-600 p-4 text-white shadow-lg transition-transform hover:scale-105 hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-950"
         aria-label="Open chat"
       >
+        <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded bg-indigo-400 text-[10px] font-bold text-white shadow-sm">M</span>
         <svg
           xmlns="http://www.w3.org/2000/svg"
           fill="none"
