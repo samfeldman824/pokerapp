@@ -459,10 +459,14 @@ export default function GamePage() {
       } else if (e.key.toLowerCase() === 'h') {
         e.preventDefault();
         setShowHandHistory(true);
+      } else if (e.key.toLowerCase() === 'm') {
+        e.preventDefault();
+        setIsChatOpen(true);
       } else if (e.key === 'Escape') {
         e.preventDefault();
         setShowLedger(false);
         setShowHandHistory(false);
+        setIsChatOpen(false);
       }
     };
 
