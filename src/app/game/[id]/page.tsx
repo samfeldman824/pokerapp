@@ -527,7 +527,7 @@ export default function GamePage() {
 
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-        <div className="bg-gray-900 border border-gray-800 rounded-xl shadow-2xl p-6 w-full max-w-md">
+        <div className="bg-gray-900 border border-gray-800 rounded-3xl shadow-2xl p-6 w-full max-w-md">
           <h2 className="text-2xl font-bold text-white mb-2">Join Game</h2>
           
           <div className="mb-6 p-4 bg-gray-950 rounded-lg text-sm text-gray-400 grid grid-cols-2 gap-2 border border-gray-800">
@@ -547,7 +547,7 @@ export default function GamePage() {
 
           <form onSubmit={handleJoinSubmit} className="space-y-5">
             <div>
-              <label htmlFor="displayName" className="block text-sm font-medium text-gray-300 mb-1">
+              <label htmlFor="displayName" className="block text-sm font-medium text-gray-300 mb-2">
                 Display Name
               </label>
               <input
@@ -557,7 +557,7 @@ export default function GamePage() {
                 maxLength={20}
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                className="w-full px-4 py-2 bg-gray-950 border border-gray-800 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder-gray-600"
+                className="w-full px-4 py-3 bg-gray-950 border border-gray-800 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder-gray-600"
                 placeholder="Enter your name"
               />
             </div>
@@ -629,7 +629,7 @@ export default function GamePage() {
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col font-sans text-gray-200 relative overflow-hidden">
       <header className="h-14 bg-gray-900 border-b border-gray-800 flex items-center justify-between px-6 z-10">
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center gap-4">
           <h1 className="font-bold text-white tracking-wider">
             GAME <span className="text-gray-500 font-mono text-sm ml-2">#{gameId.slice(0, 8)}</span>
           </h1>
@@ -645,7 +645,7 @@ export default function GamePage() {
           )}
         </div>
 
-        <div className="flex items-center space-x-6">
+        <div className="flex items-center gap-6">
           <div className="text-sm text-gray-400 flex items-center">
             {currentBlindsInfo && (
               <>
@@ -665,7 +665,7 @@ export default function GamePage() {
             )}
           </div>
 
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center gap-3">
             {isSpectator && (
               <button
                 onClick={() => setShowJoinModal(true)}
@@ -742,7 +742,7 @@ export default function GamePage() {
 
       {isHost && (
         <div className="bg-gray-900/80 backdrop-blur border-b border-gray-800 px-6 py-3 flex items-center justify-between z-10">
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center gap-2">
             <span className="text-xs text-indigo-400 uppercase tracking-widest font-bold bg-indigo-900/30 px-2 py-1 rounded">Host Controls</span>
             {betweenHandsDelay !== undefined && (
               <span className="text-xs text-gray-400 uppercase tracking-widest">
@@ -750,7 +750,7 @@ export default function GamePage() {
               </span>
             )}
           </div>
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center gap-3">
             <button
               onClick={handleStartGame}
               disabled={gameState?.phase !== "waiting"}
