@@ -445,6 +445,27 @@ export default function GamePage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [gameState, playerId, handlePauseResume]);
 
+  useEffect(() => {
+    if (!playerId && !spectatorId) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeElement = document.activeElement as HTMLElement;
+      const isInputActive = activeElement?.tagName === 'INPUT' || activeElement?.tagName === 'TEXTAREA';
+      if (isInputActive) return;
+
+      if (e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        setShowLedger(true);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowLedger(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [playerId, spectatorId]);
+
   /** Resets the game back to Waiting phase, keeping all players but restoring chip stacks. */
   const handleResetGame = () => {
     if (!playerId) return;
