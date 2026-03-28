@@ -26,17 +26,19 @@ export function PokerTable({ gameState, playerId, onAction, actionConfirmation, 
       const maxSeats = gameState.config.maxPlayers;
       offset = (seatIndex - currentPlayerSeatIndex + maxSeats) % maxSeats;
     }
-    
+
+    // All positions use percentages within the table bounds — no negative px offsets.
+    // Bottom row sits above the action bar, top row below the header.
     const positions9 = [
-      { bottom: '-40px', left: '50%', transform: 'translateX(-50%)' },
-      { bottom: '5%', left: '20%', transform: 'translateX(-50%)' },
-      { top: '60%', left: '-20px', transform: 'translateY(-50%)' },
-      { top: '20%', left: '10%', transform: 'translateY(-50%)' },
-      { top: '-40px', left: '35%', transform: 'translateX(-50%)' },
-      { top: '-40px', left: '65%', transform: 'translateX(-50%)' },
-      { top: '20%', right: '10%', transform: 'translateY(-50%)' },
-      { top: '60%', right: '-20px', transform: 'translateY(-50%)' },
-      { bottom: '5%', right: '20%', transform: 'translateX(-50%)' },
+      { bottom: '6%', left: '50%', transform: 'translateX(-50%)' },
+      { bottom: '14%', left: '18%', transform: 'translateX(-50%)' },
+      { top: '38%', left: '3%', transform: 'translateY(-50%)' },
+      { top: '14%', left: '12%', transform: 'translateY(-50%)' },
+      { top: '2%', left: '35%', transform: 'translateX(-50%)' },
+      { top: '2%', left: '65%', transform: 'translateX(-50%)' },
+      { top: '14%', right: '12%', transform: 'translateY(-50%)' },
+      { top: '38%', right: '3%', transform: 'translateY(-50%)' },
+      { bottom: '14%', right: '18%', transform: 'translateX(-50%)' },
     ];
 
     return positions9[offset];
@@ -63,11 +65,11 @@ export function PokerTable({ gameState, playerId, onAction, actionConfirmation, 
   const hasWonPot = lastHandResult && lastHandResult.results.some(r => r.winnings > 0);
 
   return (
-    <div className="w-full h-full min-h-[600px] flex items-center justify-center bg-gray-950 p-8 font-sans">
-      <div className="relative w-full max-w-6xl aspect-[2.2/1] bg-green-800 rounded-[200px] border-[16px] border-slate-800 shadow-[inset_0_0_80px_rgba(0,0,0,0.8),0_20px_40px_rgba(0,0,0,0.5)] flex items-center justify-center">
+    <div className="w-full h-full flex items-center justify-center bg-gray-950 font-sans overflow-hidden p-4 pb-24">
+      <div className="relative w-full max-w-7xl aspect-[1.8/1] bg-green-800 rounded-[200px] border-[16px] border-slate-800 shadow-[inset_0_0_80px_rgba(0,0,0,0.8),0_20px_40px_rgba(0,0,0,0.5)] flex items-center justify-center overflow-hidden">
         <div className="absolute inset-4 rounded-[180px] border border-green-600/30 pointer-events-none" />
-        
-        <div className="flex flex-col items-center justify-center space-y-4">
+
+        <div className="flex flex-col items-center justify-center space-y-4 z-10">
           <div key={`pot-${lastHandResult?.handNumber}`} className={hasWonPot ? "animate-pot-win" : ""}>
             <PotDisplay pot={gameState.pot} sidePots={gameState.sidePots} />
           </div>
@@ -81,12 +83,12 @@ export function PokerTable({ gameState, playerId, onAction, actionConfirmation, 
             ? (i - currentPlayerSeatIndex + maxSeats) % maxSeats
             : i;
           const badgeAbove = seatOffset === 0 || seatOffset === 1 || seatOffset === maxSeats - 1;
-          
+
           const isWinner = Boolean(player && lastHandResult && lastHandResult.results.some(r => r.playerId === player.id && r.winnings > 0));
 
           return (
-            <div 
-              key={i} 
+            <div
+              key={i}
               className={`absolute z-20 ${isWinner ? "animate-pot-win" : ""}`}
               style={pos}
             >
