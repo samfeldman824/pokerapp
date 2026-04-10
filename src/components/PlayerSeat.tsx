@@ -61,7 +61,7 @@ export const PlayerSeat: React.FC<PlayerSeatProps> = ({
     return (
       <div className="w-16 h-16 rounded-full border-2 border-dashed border-gray-600/50 flex flex-col items-center justify-center bg-gray-900/40 hover:bg-gray-800/60 transition-colors cursor-pointer text-gray-400 group relative shadow-inner backdrop-blur-sm">
         <span className="text-lg font-light group-hover:text-amber-500 transition-colors">+</span>
-        <span className="text-[10px] uppercase tracking-widest font-semibold group-hover:text-amber-500 transition-colors">Seat {seatIndex}</span>
+        <span className="text-[10px] uppercase tracking-widest font-semibold group-hover:text-amber-500 transition-colors">Seat {seatIndex + 1}</span>
       </div>
     );
   }
