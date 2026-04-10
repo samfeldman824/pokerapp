@@ -9,7 +9,9 @@
  * - Subscribe to server events (`joined`, `game-state`, `error`).
  * - Expose a stable `emit` callback and reactive state for the game page to consume.
  *
- * Token/player persistence (localStorage):
+ * Token/player persistence (via playerStorage):
+ * - Credentials are stored via the playerStorage abstraction, which uses either
+ *   localStorage (default, shared across tabs) or sessionStorage (private session mode).
  * - `poker_token_<gameId>`  — reconnect secret; allows the server to restore the player's
  *                             session without re-joining. Written on first join, read on reconnect.
  * - `poker_player_<gameId>` — player ID cache; lets the hook restore `playerId` from storage
@@ -19,6 +21,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { ClientGameState, HandResult } from '@/engine/types'
+import { getToken, setToken, getPlayerId, setPlayerId as storePlayerId } from '@/lib/playerStorage'
 
 type SocketClient = import('socket.io-client').Socket
 
@@ -89,21 +92,19 @@ export function useGameSocket(gameId: string, options: UseGameSocketOptions = {}
    */
   const registerPlayer = useCallback(
     (id: string) => {
-      const key = `poker_player_${gameId}`
-      localStorage.setItem(key, id)
+      storePlayerId(gameId, id)
       setPlayerId(id)
     },
     [gameId],
   )
 
   useEffect(() => {
-    const playerKey = `poker_player_${gameId}`
     let isCancelled = false
     let detachListeners: (() => void) | null = null
 
     // Restore the player ID from storage immediately so the UI doesn't flash
     // into an unauthenticated state between mount and the first `joined` event.
-    const storedPlayerId = localStorage.getItem(playerKey)
+    const storedPlayerId = getPlayerId(gameId)
     if (storedPlayerId) setPlayerId(storedPlayerId)
 
     ;(async () => {
@@ -118,7 +119,7 @@ export function useGameSocket(gameId: string, options: UseGameSocketOptions = {}
 
       const onConnect = () => {
         setIsConnected(true)
-        const storedToken = localStorage.getItem(`poker_token_${gameId}`)
+        const storedToken = getToken(gameId)
         if (storedToken) {
           socket.emit('join-game', { gameId, token: storedToken })
         }
@@ -129,11 +130,11 @@ export function useGameSocket(gameId: string, options: UseGameSocketOptions = {}
       const onJoined = (data: { playerId?: string; spectatorId?: string; token?: string }) => {
         setLastError(null)
         if (data.playerId) {
-          localStorage.setItem(playerKey, data.playerId)
+          storePlayerId(gameId, data.playerId)
           setPlayerId(data.playerId)
           setSpectatorId(null)
           if (data.token) {
-            localStorage.setItem(`poker_token_${gameId}`, data.token)
+            setToken(gameId, data.token)
           }
         } else if (data.spectatorId) {
           setSpectatorId(data.spectatorId)
@@ -147,7 +148,7 @@ export function useGameSocket(gameId: string, options: UseGameSocketOptions = {}
         setGameState(state)
         setPlayerId((prev) => {
           if (prev) return prev
-          const stored = localStorage.getItem(playerKey)
+          const stored = getPlayerId(gameId)
           return stored ?? null
         })
       }

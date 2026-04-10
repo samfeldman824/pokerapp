@@ -17,6 +17,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { setToken } from "@/lib/playerStorage";
 
 /** Field-level error map — keys match formData keys plus a `general` slot for network errors. */
 interface FormErrors {
@@ -240,7 +241,7 @@ export default function CreateGamePage() {
       }
 
       if (data.gameId && data.hostToken) {
-        localStorage.setItem(`poker_token_${data.gameId}`, data.hostToken);
+        setToken(data.gameId, data.hostToken);
         router.push(`/game/${data.gameId}`);
       } else {
         throw new Error("Invalid response from server");

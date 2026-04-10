@@ -31,6 +31,7 @@ import type { ChatMessage } from "@/lib/useGameSocket";
 import { useGameSocket } from "@/lib/useGameSocket";
 import { PlayerAction, GamePhase, ActionType, GameConfig } from "@/engine/types";
 import { getCurrentBlinds } from "@/engine/gameController";
+import { isPrivateSession, setPrivateSession as setPrivateSessionStorage, getToken } from "@/lib/playerStorage";
 import Link from "next/link";
 import { ShowMuckActionBar } from "@/components/ShowMuckActionBar";
 
@@ -75,6 +76,12 @@ export default function GamePage() {
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
+
+  const [privateSession, setPrivateSession] = useState(false);
+
+  useEffect(() => {
+    setPrivateSession(isPrivateSession());
+  }, []);
 
   // Queued join payloads — held until the socket is ready, then sent in a useEffect
   const [pendingTokenJoin, setPendingTokenJoin] = useState<string | null>(null);
@@ -241,7 +248,7 @@ export default function GamePage() {
 
         // A saved token means this browser has previously joined (or is the host).
         // Queue the token join; it will fire once the socket connects.
-        const token = localStorage.getItem(`poker_token_${gameId}`);
+        const token = getToken(gameId);
         if (token) {
           setPendingTokenJoin(token);
         } else {
@@ -485,6 +492,12 @@ export default function GamePage() {
     emit("rebuy", { gameId, playerId });
   };
 
+  const handleTogglePrivateSession = () => {
+    const next = !privateSession;
+    setPrivateSession(next);
+    setPrivateSessionStorage(next);
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-950 text-gray-200">
@@ -692,6 +705,20 @@ export default function GamePage() {
             >
               Session Ledger <span className="ml-1.5 text-xs text-gray-500 font-normal">L</span>
             </button>
+            {isHost && (
+              <button
+                onClick={handleTogglePrivateSession}
+                title={privateSession ? "Each tab is a separate player (Private Session ON)" : "Same player across tabs (Private Session OFF)"}
+                className={
+                  "px-3 py-1.5 text-xs font-medium rounded border transition-colors " +
+                  (privateSession
+                    ? "bg-amber-900/30 hover:bg-amber-900/50 text-amber-300 border-amber-600/40"
+                    : "bg-gray-800 hover:bg-gray-700 text-gray-400 border-gray-700")
+                }
+              >
+                {privateSession ? "Private" : "Shared"}
+              </button>
+            )}
           </div>
 
           <div
