@@ -23,8 +23,8 @@ function getStorage(): Storage {
 }
 
 export function isPrivateSession(): boolean {
-  if (typeof window === 'undefined') return false
-  return localStorage.getItem(PRIVATE_SESSION_KEY) === 'true'
+  if (typeof window === 'undefined') return true
+  return localStorage.getItem(PRIVATE_SESSION_KEY) !== 'false'
 }
 
 export function setPrivateSession(enabled: boolean): void {
