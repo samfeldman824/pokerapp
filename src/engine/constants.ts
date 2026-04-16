@@ -22,6 +22,7 @@ export const DEFAULT_CONFIG: GameConfig = {
   startingStack: 1000,
   timePerAction: 30,
   betweenHandsDelay: 3,
+  runItTwice: false,
   maxPlayers: 9,
 }
 

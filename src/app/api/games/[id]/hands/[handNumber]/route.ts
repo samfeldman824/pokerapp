@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 
 import { db } from '@/db'
 import { games, handActions, handResults, hands, players } from '@/db/schema'
+import { buildHandHistoryDetail } from '@/lib/handHistory'
 
 export async function GET(
   _request: Request,
@@ -29,6 +30,7 @@ export async function GET(
       handNumber: hands.handNumber,
       potTotal: hands.potTotal,
       communityCards: hands.communityCards,
+      boards: hands.boards,
       completedAt: hands.completedAt,
     })
     .from(hands)
@@ -56,6 +58,7 @@ export async function GET(
     .select({
       displayName: players.displayName,
       holeCards: handResults.holeCards,
+      boardResults: handResults.boardResults,
       handRank: handResults.handRank,
       handDescription: handResults.handDescription,
       winnings: handResults.winnings,
@@ -64,12 +67,7 @@ export async function GET(
     .innerJoin(players, eq(handResults.playerId, players.id))
     .where(eq(handResults.handId, hand.id))
 
-  return NextResponse.json({
-    handNumber: hand.handNumber,
-    potTotal: hand.potTotal,
-    communityCards: hand.communityCards,
-    completedAt: hand.completedAt,
-    actions: actionsRows,
-    results: resultsRows,
-  })
+  const response = buildHandHistoryDetail(hand, actionsRows, resultsRows)
+
+  return NextResponse.json(response)
 }

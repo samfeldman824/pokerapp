@@ -31,7 +31,6 @@ import { randomUUID } from 'crypto'
 import {
   advanceRunout,
   getPlayerView,
-  getShowdownResults,
   handleAction,
   isHandComplete,
   resetGame,
@@ -52,9 +51,12 @@ import { evaluateHandWithRaw } from '../engine/handEvaluator'
 import {
   ActionType,
   Card,
+  CompletedHandBoard,
   GamePhase,
   GameState,
   HandResult,
+  HandResultBoard,
+  PotAward,
   PlayerAction,
   PlayerState,
 } from '../engine/types'
@@ -143,8 +145,42 @@ type ChatMessagePayload = {
 type HandResultEvent = {
   gameId: string
   handNumber: number
-  communityCards: GameState['communityCards']
+  boards: CompletedHandBoard[]
   results: HandResult[]
+}
+
+type RunItTwiceStartedEvent = {
+  gameId: string
+}
+
+type RunItTwiceDecisionStartedEvent = {
+  gameId: string
+  playerIds: string[]
+}
+
+type RunItTwiceDecisionUpdatedEvent = {
+  gameId: string
+  playerId: string
+  agree: boolean
+}
+
+type BoardResultEvent = {
+  gameId: string
+  runIndex: 0 | 1
+  board: Card[]
+  potAwards: PotAward[]
+}
+
+type RunItTwiceDecisionPayload = {
+  gameId: string
+  playerId: string
+  agree: boolean
+}
+
+type UpdateConfigPayload = {
+  gameId: string
+  playerId: string
+  config: Partial<GameState['config']>
 }
 
 // ---------------------------------------------------------------------------
@@ -257,8 +293,15 @@ async function advanceRunoutLocked(io: Server, gameId: string): Promise<void> {
       if (!game || game.isPaused) return
 
       const nextGame = advanceRunout(game)
+      const boardResultEvent = getBoardResultEvent(game, nextGame)
       gameStore.set(nextGame.id, nextGame)
       await saveGame(nextGame)
+
+      await broadcastGameState(io, nextGame)
+
+      if (boardResultEvent) {
+        await emitBoardResult(io, boardResultEvent)
+      }
 
       if (isHandComplete(nextGame)) {
         const handResultEvent = await persistCompletedHand(gameId, game, nextGame)
@@ -267,8 +310,6 @@ async function advanceRunoutLocked(io: Server, gameId: string): Promise<void> {
       } else {
         scheduleRunoutAdvance(io, gameId)
       }
-
-      await broadcastGameState(io, nextGame)
     } catch (err) {
       console.error(`[runout] ${gameId}: error in advanceRunoutLocked:`, err)
     }
@@ -314,6 +355,21 @@ function getUncontestedWinner(game: GameState): PlayerState | null {
   return remainingPlayers.length === 1 ? remainingPlayers[0] : null
 }
 
+function buildCompletedHandBoards(game: GameState): CompletedHandBoard[] {
+  if (game.runItTwiceEligible && game.firstBoard && game.secondBoard) {
+    return [
+      { runIndex: 0, communityCards: game.firstBoard },
+      { runIndex: 1, communityCards: game.secondBoard },
+    ]
+  }
+
+  return [{ runIndex: 0, communityCards: game.communityCards }]
+}
+
+function getTotalPotFromResolvedPlayers(players: PlayerState[]): number {
+  return players.reduce((sum, player) => sum + player.totalBetThisHand, 0)
+}
+
 // ---------------------------------------------------------------------------
 // Hand history helpers
 // ---------------------------------------------------------------------------
@@ -351,48 +407,84 @@ function buildHandResults(previousGame: GameState, resolvedGame: GameState): Han
     bet: player.totalBetThisHand,
   }))
   const pots = resolvedGame.sidePots.length > 0 ? resolvedGame.sidePots : calculatePots(handPlayers)
+  const boards = buildCompletedHandBoards(resolvedGame)
+  const boardResultsByRunIndex = new Map<
+    number,
+    {
+      evaluatedHands: Map<string, { evaluation: HandResultBoard['evaluation']; rawHand: ReturnType<typeof evaluateHandWithRaw>['rawHand'] }>
+      potAwards: PotAward[]
+    }
+  >()
 
-  const evaluatedHands = new Map(
-    resolvedPlayers
-      .filter((player): player is PlayerWithCards => {
-        return !player.isFolded && player.holeCards !== null
-      })
-      .map((player) => {
-        const { evaluation, rawHand } = evaluateHandWithRaw(player.holeCards, resolvedGame.communityCards)
+  for (const board of boards) {
+    const evaluatedHands = new Map(
+      resolvedPlayers
+        .filter((player): player is PlayerWithCards => {
+          return !player.isFolded && player.holeCards !== null
+        })
+        .map((player) => {
+          const { evaluation, rawHand } = evaluateHandWithRaw(player.holeCards, board.communityCards)
 
-        return [
-          player.id,
-          {
-            evaluation,
-            rawHand,
-          },
-        ] as const
-      })
-  )
-
-  const potAwards = pots.length === 0
-    ? []
-    : awardPots(
-        pots,
-        new Map(
-          Array.from(evaluatedHands.entries()).map(([playerId, hand]) => [
-            playerId,
+          return [
+            player.id,
             {
-              rank: hand.evaluation.rank,
-              description: hand.evaluation.description,
-              raw: hand.rawHand,
+              evaluation,
+              rawHand,
             },
-          ])
-        )
-      )
+          ] as const
+        })
+    )
+
+    const potAwards = boards.length === 1
+      ? (pots.length === 0
+          ? []
+          : awardPots(
+              pots,
+              new Map(
+                Array.from(evaluatedHands.entries()).map(([playerId, hand]) => [
+                  playerId,
+                  {
+                    rank: hand.evaluation?.rank ?? null,
+                    description: hand.evaluation?.description ?? null,
+                    raw: hand.rawHand,
+                  },
+                ])
+              )
+            ))
+      : buildRunItTwiceBoardAwards(resolvedGame, board.communityCards, board.runIndex)
+
+    boardResultsByRunIndex.set(board.runIndex, {
+      evaluatedHands,
+      potAwards,
+    })
+  }
+
+  const potAwards = Array.from(boardResultsByRunIndex.values()).flatMap((boardResult) => boardResult.potAwards)
 
   return resolvedPlayers.map((player) => {
     const previousPlayer = previousPlayersById.get(player.id)
     const winnings = previousPlayer ? Math.max(0, player.chips - previousPlayer.chips) : 0
     const chipDelta = previousPlayer ? player.chips - previousPlayer.chips : 0
-    const evaluation = player.isFolded || player.holeCards === null
-      ? null
-      : evaluatedHands.get(player.id)?.evaluation ?? null
+    const boardResults = boards.map<HandResultBoard>((board) => {
+      const boardData = boardResultsByRunIndex.get(board.runIndex)
+      const boardPotAwards = boardData?.potAwards.filter((potAward) => potAward.winnerIds.includes(player.id)) ?? []
+
+      return {
+        runIndex: board.runIndex,
+        evaluation: player.isFolded || player.holeCards === null
+          ? null
+          : boardData?.evaluatedHands.get(player.id)?.evaluation ?? null,
+        winnings: boardPotAwards.reduce((sum, award) => sum + award.amount, 0),
+        potAwards: boardPotAwards.map((potAward) => ({
+          potIndex: potAward.potIndex,
+          runIndex: potAward.runIndex,
+          amount: potAward.amount,
+          winnerIds: potAward.winnerIds,
+          handDescription: potAward.handDescription,
+        })),
+      }
+    })
+    const evaluation = boardResults.length === 1 ? boardResults[0].evaluation : null
 
     return {
       playerId: player.id,
@@ -402,12 +494,40 @@ function buildHandResults(previousGame: GameState, resolvedGame: GameState): Han
       chipDelta,
       potAwards: potAwards.filter((potAward) => potAward.winnerIds.includes(player.id)).map((potAward) => ({
         potIndex: potAward.potIndex,
+        runIndex: potAward.runIndex,
         amount: potAward.amount,
         winnerIds: potAward.winnerIds,
         handDescription: potAward.handDescription,
       })),
+      boardResults,
     }
   })
+}
+
+function emitRunItTwiceReplayEvents(socket: Socket, game: GameState): void {
+  if (!game.runItTwiceEligible) {
+    return
+  }
+
+  socket.emit('runItTwiceStarted', { gameId: game.id })
+
+  if (game.firstBoard && (game.currentRunIndex === 1 || game.phase === GamePhase.Showdown)) {
+    socket.emit('boardResult', {
+      gameId: game.id,
+      runIndex: 0,
+      board: game.firstBoard,
+      potAwards: buildRunItTwiceBoardAwards(game, game.firstBoard, 0),
+    })
+  }
+
+  if (game.secondBoard && game.phase === GamePhase.Showdown) {
+    socket.emit('boardResult', {
+      gameId: game.id,
+      runIndex: 1,
+      board: game.secondBoard,
+      potAwards: buildRunItTwiceBoardAwards(game, game.secondBoard, 1),
+    })
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -442,6 +562,224 @@ async function emitHandResult(io: Server, event: HandResultEvent): Promise<void>
   io.to(event.gameId).emit('hand-result', event)
 }
 
+async function emitRunItTwiceStarted(io: Server, event: RunItTwiceStartedEvent): Promise<void> {
+  io.to(event.gameId).emit('runItTwiceStarted', event)
+}
+
+async function emitRunItTwiceDecisionStarted(io: Server, event: RunItTwiceDecisionStartedEvent): Promise<void> {
+  console.info('[RIT] decision-started emit', event)
+  io.to(event.gameId).emit('runItTwiceDecisionStarted', event)
+}
+
+async function emitRunItTwiceDecisionUpdated(io: Server, event: RunItTwiceDecisionUpdatedEvent): Promise<void> {
+  console.info('[RIT] decision-updated emit', event)
+  io.to(event.gameId).emit('runItTwiceDecisionUpdated', event)
+}
+
+async function emitBoardResult(io: Server, event: BoardResultEvent): Promise<void> {
+  io.to(event.gameId).emit('boardResult', event)
+}
+
+function buildRunItTwiceBoardAwards(game: GameState, board: Card[], runIndex: 0 | 1): PotAward[] {
+  const handPlayers = getPlayersInResolvedHand(game)
+  const potPlayers = handPlayers.map((player) => ({
+    ...player,
+    bet: player.totalBetThisHand,
+  }))
+  const pots = calculatePots(potPlayers)
+  const runPots = pots.map((pot) => ({
+    ...pot,
+    amount: runIndex === 0 ? Math.ceil(pot.amount / 2) : Math.floor(pot.amount / 2),
+  }))
+
+  if (runPots.length === 0) {
+    return []
+  }
+
+  const evaluatedHands = new Map(
+    handPlayers
+      .filter((player): player is PlayerWithCards => {
+        return !player.isFolded && player.holeCards !== null
+      })
+      .map((player) => {
+        const { evaluation, rawHand } = evaluateHandWithRaw(player.holeCards, board)
+        return [
+          player.id,
+          {
+            rank: evaluation.rank,
+            description: evaluation.description,
+            raw: rawHand,
+          },
+        ] as const
+      })
+  )
+
+  return awardPots(runPots, evaluatedHands).map((award) => ({
+    ...award,
+    runIndex,
+  }))
+}
+
+function getDecisionPlayerIds(game: GameState): string[] {
+  return Object.keys(game.runItTwiceVotes)
+}
+
+function resolveRunItTwiceDecision(game: GameState, playerId: string, agree: boolean): {
+  nextGame: GameState
+  decisionCompleted: boolean
+  startRunout: boolean
+} {
+  const vote = game.runItTwiceVotes[playerId]
+
+  if (!game.runItTwiceDecisionPending || vote === undefined) {
+    throw new Error('No Run It Twice decision pending for this player')
+  }
+
+  if (vote !== null) {
+    throw new Error('Run It Twice decision already submitted')
+  }
+
+  const updatedVotes = {
+    ...game.runItTwiceVotes,
+    [playerId]: agree,
+  }
+
+  if (!agree) {
+    return {
+      nextGame: {
+        ...game,
+        runItTwiceDecisionPending: false,
+        runItTwiceEligible: false,
+        runItTwiceVotes: updatedVotes,
+        currentRunIndex: null,
+        runoutStartPhase: null,
+        runoutPhase: null,
+        firstBoard: null,
+        secondBoard: null,
+        activePlayerIndex: -1,
+        timerStart: null,
+        actionTimerStart: null,
+      },
+      decisionCompleted: true,
+      startRunout: true,
+    }
+  }
+
+  const allAgreed = Object.values(updatedVotes).every((value) => value === true)
+
+  if (!allAgreed) {
+    return {
+      nextGame: {
+        ...game,
+        runItTwiceVotes: updatedVotes,
+      },
+      decisionCompleted: false,
+      startRunout: false,
+    }
+  }
+
+  return {
+    nextGame: {
+      ...game,
+      runItTwiceDecisionPending: false,
+      runItTwiceEligible: true,
+      runItTwiceVotes: updatedVotes,
+      currentRunIndex: 0,
+      runoutStartPhase: game.phase,
+      runoutPhase: game.phase,
+      firstBoard: null,
+      secondBoard: null,
+      activePlayerIndex: -1,
+      timerStart: null,
+      actionTimerStart: null,
+    },
+    decisionCompleted: true,
+    startRunout: true,
+  }
+}
+
+async function applyRunItTwiceDecisionLocked(
+  io: Server,
+  game: GameState,
+  playerId: string,
+  agree: boolean,
+): Promise<GameState> {
+  const { nextGame, decisionCompleted, startRunout } = resolveRunItTwiceDecision(
+    game,
+    playerId,
+    agree,
+  )
+
+  gameStore.set(nextGame.id, nextGame)
+  await saveGame(nextGame)
+
+  await emitRunItTwiceDecisionUpdated(io, {
+    gameId: nextGame.id,
+    playerId,
+    agree,
+  })
+
+  if (decisionCompleted && nextGame.runItTwiceEligible) {
+    await emitRunItTwiceStarted(io, { gameId: nextGame.id })
+  }
+
+  await broadcastGameState(io, nextGame)
+
+  if (decisionCompleted && startRunout) {
+    scheduleRunoutAdvance(io, nextGame.id)
+  }
+
+  return nextGame
+}
+
+function getBoardResultEvent(previousGame: GameState, nextGame: GameState): BoardResultEvent | null {
+  if (!nextGame.runItTwiceEligible) {
+    return null
+  }
+
+  if (previousGame.currentRunIndex === 0 && nextGame.currentRunIndex === 1 && nextGame.firstBoard) {
+    return {
+      gameId: nextGame.id,
+      runIndex: 0,
+      board: nextGame.firstBoard,
+      potAwards: buildRunItTwiceBoardAwards(nextGame, nextGame.firstBoard, 0),
+    }
+  }
+
+  if (previousGame.currentRunIndex === 1 && nextGame.phase === GamePhase.Showdown && nextGame.secondBoard) {
+    return {
+      gameId: nextGame.id,
+      runIndex: 1,
+      board: nextGame.secondBoard,
+      potAwards: buildRunItTwiceBoardAwards(nextGame, nextGame.secondBoard, 1),
+    }
+  }
+
+  return null
+}
+
+function emitRunItTwiceDecisionReplayEvents(socket: Socket, game: GameState): void {
+  if (!game.runItTwiceDecisionPending) {
+    return
+  }
+
+  const playerIds = getDecisionPlayerIds(game)
+  socket.emit('runItTwiceDecisionStarted', { gameId: game.id, playerIds })
+
+  playerIds.forEach((playerId) => {
+    const vote = game.runItTwiceVotes[playerId]
+    if (vote === null) {
+      return
+    }
+
+    socket.emit('runItTwiceDecisionUpdated', {
+      gameId: game.id,
+      playerId,
+      agree: vote,
+    })
+  })
+}
+
 /**
  * Saves hand results to the database and returns the `HandResultEvent` payload
  * ready to be emitted to clients.
@@ -451,16 +789,26 @@ async function emitHandResult(io: Server, event: HandResultEvent): Promise<void>
  */
 async function persistCompletedHand(gameId: string, previousGame: GameState, resolvedGame: GameState): Promise<HandResultEvent> {
   const handId = getCurrentHandId(gameId)
+  const resolvedPlayers = getPlayersInResolvedHand(resolvedGame)
+  const boards = buildCompletedHandBoards(resolvedGame)
   const results = buildHandResults(previousGame, resolvedGame)
 
-  await saveHandResults(handId, results)
+  await saveHandResults(
+    handId,
+    {
+      communityCards: resolvedGame.communityCards,
+      boards,
+      potTotal: getTotalPotFromResolvedPlayers(resolvedPlayers),
+    },
+    results,
+  )
   activeHandIds.delete(gameId)
   handActionOrder.delete(gameId)
 
   return {
     gameId: resolvedGame.id,
     handNumber: resolvedGame.handNumber,
-    communityCards: resolvedGame.communityCards,
+    boards,
     results,
   }
 }
@@ -493,8 +841,11 @@ async function autoFoldCurrentPlayerLocked(
 
   clearGameTimer(currentGame.id)
 
-  let nextGame = handleAction(currentGame, expectedPlayerId, { type: ActionType.Fold })
+  const actionResult = handleAction(currentGame, expectedPlayerId, { type: ActionType.Fold })
+  let nextGame = actionResult.game
   let handResultEvent: HandResultEvent | undefined
+  let runItTwiceStartedEvent: RunItTwiceStartedEvent | undefined
+  let runItTwiceDecisionStartedEvent: RunItTwiceDecisionStartedEvent | undefined
   const handId = getCurrentHandId(currentGame.id)
 
   await saveHandAction(
@@ -506,14 +857,21 @@ async function autoFoldCurrentPlayerLocked(
     getNextActionOrder(currentGame.id)
   )
 
-  if (isHandComplete(nextGame)) {
-    const resolvedGame = nextGame.phase === GamePhase.Showdown
-      ? nextGame
-      : getShowdownResults(nextGame)
+  if (nextGame.runItTwiceDecisionPending && !currentGame.runItTwiceDecisionPending) {
+    runItTwiceDecisionStartedEvent = {
+      gameId: nextGame.id,
+      playerIds: getDecisionPlayerIds(nextGame),
+    }
+  }
 
-    handResultEvent = await persistCompletedHand(currentGame.id, currentGame, resolvedGame)
-    nextGame = resolvedGame
+  if (actionResult.kind === 'showdown') {
+    handResultEvent = await persistCompletedHand(currentGame.id, currentGame, nextGame)
     scheduleNextHand(io, currentGame.id)
+  } else if (actionResult.kind === 'runout') {
+    if (!currentGame.runItTwiceEligible && nextGame.runItTwiceEligible) {
+      runItTwiceStartedEvent = { gameId: nextGame.id }
+    }
+    scheduleRunoutAdvance(io, currentGame.id)
   }
 
   nextGame = scheduleActionTimer(io, nextGame)
@@ -522,6 +880,14 @@ async function autoFoldCurrentPlayerLocked(
 
   if (handResultEvent) {
     await emitHandResult(io, handResultEvent)
+  }
+
+  if (runItTwiceStartedEvent) {
+    await emitRunItTwiceStarted(io, runItTwiceStartedEvent)
+  }
+
+  if (runItTwiceDecisionStartedEvent) {
+    await emitRunItTwiceDecisionStarted(io, runItTwiceDecisionStartedEvent)
   }
 
   await broadcastGameState(io, nextGame)
@@ -625,6 +991,8 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
           await saveGame(updatedGame)
           socket.emit('joined', { spectatorId })
           socket.emit('game-state', getPlayerView(updatedGame, ''))
+          emitRunItTwiceDecisionReplayEvents(socket, updatedGame)
+          emitRunItTwiceReplayEvents(socket, updatedGame)
           await broadcastGameState(io, updatedGame)
           return
         }
@@ -649,6 +1017,8 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
             await saveGame(updatedGame)
             socket.emit('joined', { playerId: existingPlayer.id })
             socket.emit('game-state', getPlayerView(updatedGame, existingPlayer.id))
+            emitRunItTwiceDecisionReplayEvents(socket, updatedGame)
+            emitRunItTwiceReplayEvents(socket, updatedGame)
             await broadcastGameState(io, updatedGame)
             return
           }
@@ -753,12 +1123,29 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
 
         clearGameTimer(payload.gameId)
 
-        let nextGame = handleAction(game, payload.playerId, payload.action)
+        const actionResult = handleAction(game, payload.playerId, payload.action)
+        let nextGame = actionResult.game
         let handResultEvent: HandResultEvent | undefined
+        let runItTwiceStartedEvent: RunItTwiceStartedEvent | undefined
+        let runItTwiceDecisionStartedEvent: RunItTwiceDecisionStartedEvent | undefined
         const handId = getCurrentHandId(payload.gameId)
         const actionAmount = (payload.action.type === ActionType.Bet || payload.action.type === ActionType.Raise)
           ? payload.action.amount
           : null
+
+        console.info('[RIT] player-action handled', {
+          gameId: payload.gameId,
+          playerId: payload.playerId,
+          actionType: payload.action.type,
+          kind: actionResult.kind,
+          phaseBefore: game.phase,
+          phaseAfter: nextGame.phase,
+          activePlayerAfter: nextGame.activePlayerIndex,
+          runItTwiceEnabled: nextGame.config.runItTwice,
+          decisionPendingAfter: nextGame.runItTwiceDecisionPending,
+          eligibleAfter: nextGame.runItTwiceEligible,
+          votesAfter: nextGame.runItTwiceVotes,
+        })
 
         await saveHandAction(
           handId,
@@ -769,14 +1156,20 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
           getNextActionOrder(payload.gameId)
         )
 
-        if (isHandComplete(nextGame)) {
-          const resolvedGame = nextGame.phase === GamePhase.Showdown
-            ? nextGame
-            : getShowdownResults(nextGame)
-          handResultEvent = await persistCompletedHand(payload.gameId, game, resolvedGame)
-          nextGame = resolvedGame
+        if (nextGame.runItTwiceDecisionPending && !game.runItTwiceDecisionPending) {
+          runItTwiceDecisionStartedEvent = {
+            gameId: nextGame.id,
+            playerIds: getDecisionPlayerIds(nextGame),
+          }
+        }
+
+        if (actionResult.kind === 'showdown') {
+          handResultEvent = await persistCompletedHand(payload.gameId, game, nextGame)
           scheduleNextHand(io, payload.gameId)
-        } else if (nextGame.activePlayerIndex === -1) {
+        } else if (actionResult.kind === 'runout') {
+          if (!game.runItTwiceEligible && nextGame.runItTwiceEligible) {
+            runItTwiceStartedEvent = { gameId: nextGame.id }
+          }
           scheduleRunoutAdvance(io, payload.gameId)
         }
 
@@ -789,6 +1182,131 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
           await emitHandResult(io, handResultEvent)
         }
 
+        if (runItTwiceStartedEvent) {
+          await emitRunItTwiceStarted(io, runItTwiceStartedEvent)
+        }
+
+        if (runItTwiceDecisionStartedEvent) {
+          await emitRunItTwiceDecisionStarted(io, runItTwiceDecisionStartedEvent)
+        }
+
+        if (nextGame.runItTwiceDecisionPending) {
+          console.info('[RIT] broadcasting decision-pending game-state', {
+            gameId: nextGame.id,
+            phase: nextGame.phase,
+            activePlayerIndex: nextGame.activePlayerIndex,
+            votes: nextGame.runItTwiceVotes,
+          })
+        }
+
+        await broadcastGameState(io, nextGame)
+      } catch (error) {
+        emitSocketError(socket, error)
+      }
+    })
+  })
+
+  socket.on('run-it-twice-decision', (payload: RunItTwiceDecisionPayload) => {
+    void gameStore.withLock(payload.gameId, async () => {
+      try {
+        const game = await getOrLoadGame(payload.gameId)
+
+        if (!game) {
+          throw new Error('Game not found')
+        }
+
+        const socketInfo = getSocketInfo(socket.id)
+        if (socketInfo?.gameId === payload.gameId && socketInfo.isSpectator) {
+          throw new Error('Spectators cannot vote on Run It Twice')
+        }
+
+        const socketPlayerId = socketInfo?.gameId === payload.gameId ? socketInfo.playerId : undefined
+        if (!socketPlayerId || socketPlayerId !== payload.playerId) {
+          throw new Error('Invalid Run It Twice decision sender')
+        }
+
+        const actingPlayer = game.players.find((player) => player.id === payload.playerId)
+        if (!actingPlayer) {
+          throw new Error('Player not found')
+        }
+
+        if (!actingPlayer.isConnected) {
+          throw new Error('Disconnected players cannot vote on Run It Twice')
+        }
+
+        const { nextGame, decisionCompleted, startRunout } = resolveRunItTwiceDecision(
+          game,
+          payload.playerId,
+          payload.agree,
+        )
+
+        console.info('[RIT] decision received', {
+          gameId: payload.gameId,
+          playerId: payload.playerId,
+          agree: payload.agree,
+          decisionCompleted,
+          startRunout,
+          eligibleAfter: nextGame.runItTwiceEligible,
+          votesAfter: nextGame.runItTwiceVotes,
+        })
+
+        await applyRunItTwiceDecisionLocked(io, game, payload.playerId, payload.agree)
+      } catch (error) {
+        emitSocketError(socket, error)
+      }
+    })
+  })
+
+  socket.on('update-config', (payload: UpdateConfigPayload) => {
+    void gameStore.withLock(payload.gameId, async () => {
+      try {
+        const game = await getOrLoadGame(payload.gameId)
+
+        if (!game) {
+          throw new Error('Game not found')
+        }
+
+        const socketInfo = getSocketInfo(socket.id)
+        if (socketInfo?.gameId === payload.gameId && socketInfo.isSpectator) {
+          throw new Error('Spectators cannot update config')
+        }
+
+        if (payload.playerId !== game.hostPlayerId) {
+          throw new Error('Only the host can update config')
+        }
+
+        const nextConfig = {
+          ...game.config,
+          ...payload.config,
+          runItTwice: typeof payload.config.runItTwice === 'boolean'
+            ? payload.config.runItTwice
+            : game.config.runItTwice,
+        }
+
+        if (game.phase !== GamePhase.Waiting && payload.config.runItTwice !== undefined) {
+          console.info('[RIT] update-config during active hand: defer until next hand semantics expected', {
+            gameId: game.id,
+            runItTwiceBefore: game.config.runItTwice,
+            requestedRunItTwice: payload.config.runItTwice,
+            phase: game.phase,
+          })
+        }
+
+        const nextGame = {
+          ...game,
+          config: nextConfig,
+        }
+
+        console.info('[RIT] config-updated', {
+          gameId: game.id,
+          byPlayerId: payload.playerId,
+          runItTwiceBefore: game.config.runItTwice,
+          runItTwiceAfter: nextGame.config.runItTwice,
+          phase: game.phase,
+        })
+
+        gameStore.set(nextGame.id, nextGame)
+        await saveGame(nextGame)
         await broadcastGameState(io, nextGame)
       } catch (error) {
         emitSocketError(socket, error)
@@ -920,6 +1438,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
 
         clearGameTimer(payload.gameId)
         clearNextHandTimer(payload.gameId)
+        clearRunoutTimer(payload.gameId)
 
         const nextGame = {
           ...resetTimerState(game),
@@ -965,6 +1484,12 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
 
         if (nextGame.phase === GamePhase.Showdown) {
           scheduleNextHand(io, nextGame.id)
+        } else if (
+          nextGame.activePlayerIndex === -1 &&
+          !isHandComplete(nextGame) &&
+          (nextGame.runoutPhase !== null || nextGame.currentRunIndex !== null)
+        ) {
+          scheduleRunoutAdvance(io, nextGame.id)
         }
 
         nextGame = scheduleActionTimer(io, nextGame)
@@ -992,6 +1517,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
 
         clearGameTimer(payload.gameId)
         clearNextHandTimer(payload.gameId)
+        clearRunoutTimer(payload.gameId)
 
         const nextGame = resetGame(game)
 
@@ -1109,11 +1635,24 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
           }
         }
 
+        const disconnectedGameId = socketInfo.gameId
+
+        // Cancel any existing disconnect timer for this player
+        const existingDisconnectTimer = disconnectTimers.get(disconnectedPlayerId)
+        if (existingDisconnectTimer) {
+          clearTimeout(existingDisconnectTimer)
+        }
+
+        const pendingVote = nextGame.runItTwiceVotes[disconnectedPlayerId]
+
+        if (nextGame.runItTwiceDecisionPending && pendingVote === null) {
+          await applyRunItTwiceDecisionLocked(io, nextGame, disconnectedPlayerId, false)
+          return
+        }
+
         gameStore.set(nextGame.id, nextGame)
         await saveGame(nextGame)
         await broadcastGameState(io, nextGame)
-
-        const disconnectedGameId = socketInfo.gameId
 
         // Evict the game from memory after 5 minutes if all players are gone
         if (nextGame.players.every(p => !p.isConnected)) {
@@ -1123,12 +1662,6 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
               gameStore.delete(disconnectedGameId)
             }
           }, 5 * 60 * 1000)
-        }
-
-        // Cancel any existing disconnect timer for this player
-        const existingDisconnectTimer = disconnectTimers.get(disconnectedPlayerId)
-        if (existingDisconnectTimer) {
-          clearTimeout(existingDisconnectTimer)
         }
 
         const disconnectTimer = setTimeout(() => {

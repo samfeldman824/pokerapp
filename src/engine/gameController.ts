@@ -25,7 +25,12 @@ import { DEFAULT_CONFIG } from './constants'
 import { createDeck, dealCards, shuffleDeck } from './deck'
 import { evaluateHandWithRaw } from './handEvaluator'
 import { awardPots, calculatePots, splitPotEvenly } from './potCalculator'
-import { Card, ClientGameState, ClientPlayerState, GameConfig, GamePhase, GameState, PlayerAction, PlayerState, SidePot } from './types'
+import { Card, ClientGameState, ClientPlayerState, GameConfig, GamePhase, GameState, PlayerAction, PlayerState, PotAward, SidePot } from './types'
+
+export type HandleActionResult =
+  | { kind: 'waitingForAction'; game: GameState }
+  | { kind: 'runout'; game: GameState }
+  | { kind: 'showdown'; game: GameState }
 
 // ---------------------------------------------------------------------------
 // Internal array helpers
@@ -132,6 +137,53 @@ function getPlayerById(players: PlayerState[], playerId: string): PlayerState | 
 /** Players still alive in the hand (not folded). */
 function getRemainingPlayers(game: GameState): PlayerState[] {
   return getCurrentHandPlayers(game.players).filter(player => !player.isFolded)
+}
+
+function areAllRemainingPlayersAllIn(game: GameState): boolean {
+  const remainingPlayers = getRemainingPlayers(game)
+  return remainingPlayers.length > 1 && remainingPlayers.every(player => player.isAllIn)
+}
+
+function hasAnyRemainingPlayerAllIn(game: GameState): boolean {
+  const remainingPlayers = getRemainingPlayers(game)
+  return remainingPlayers.length > 1 && remainingPlayers.some(player => player.isAllIn)
+}
+
+function hasCommunityCardsRemainingToDeal(phase: GamePhase): boolean {
+  return phase === GamePhase.Preflop || phase === GamePhase.Flop || phase === GamePhase.Turn
+}
+
+function getRunItTwiceSecondRunSeedCards(firstBoard: Card[], runoutStartPhase: GamePhase | null): Card[] {
+  if (runoutStartPhase === GamePhase.Flop) {
+    return firstBoard.slice(0, 3)
+  }
+
+  if (runoutStartPhase === GamePhase.Turn) {
+    return firstBoard.slice(0, 4)
+  }
+
+  return []
+}
+
+function startRunItTwiceDecision(game: GameState): GameState {
+  const runItTwiceVotes = Object.fromEntries(
+    getRemainingPlayers(game).map((player) => [player.id, null])
+  ) as Record<string, boolean | null>
+
+  return {
+    ...game,
+    runItTwiceEligible: false,
+    runItTwiceDecisionPending: true,
+    runItTwiceVotes,
+    currentRunIndex: null,
+    runoutStartPhase: null,
+    runoutPhase: null,
+    firstBoard: null,
+    secondBoard: null,
+    activePlayerIndex: -1,
+    timerStart: null,
+    actionTimerStart: null,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -261,6 +313,14 @@ export function createGame(config: GameConfig): GameState {
     players: [],
     spectators: [],
     communityCards: [],
+    runItTwiceEligible: false,
+    runItTwiceDecisionPending: false,
+    runItTwiceVotes: {},
+    currentRunIndex: null,
+    runoutPhase: null,
+    runoutStartPhase: null,
+    firstBoard: null,
+    secondBoard: null,
     pot: 0,
     sidePots: [],
     dealerIndex: -1,
@@ -313,6 +373,14 @@ export function resetGame(game: GameState): GameState {
     phase: GamePhase.Waiting,
     players: resetPlayers,
     communityCards: [],
+    runItTwiceEligible: false,
+    runItTwiceDecisionPending: false,
+    runItTwiceVotes: {},
+    currentRunIndex: null,
+    runoutPhase: null,
+    runoutStartPhase: null,
+    firstBoard: null,
+    secondBoard: null,
     pot: 0,
     sidePots: [],
     dealerIndex: -1,
@@ -404,6 +472,14 @@ export function startHand(game: GameState): GameState {
     phase: GamePhase.Preflop,
     players: dealtPlayers,
     communityCards: [],
+    runItTwiceEligible: false,
+    runItTwiceDecisionPending: false,
+    runItTwiceVotes: {},
+    currentRunIndex: null,
+    runoutPhase: null,
+    runoutStartPhase: null,
+    firstBoard: null,
+    secondBoard: null,
     pot: 0,
     sidePots: [],
     dealerIndex,
@@ -498,6 +574,99 @@ export function getShowdownResults(game: GameState): GameState {
   }
 }
 
+function splitPotsForRunItTwice(pots: SidePot[]): { run0Pots: SidePot[]; run1Pots: SidePot[] } {
+  return {
+    run0Pots: pots.map((pot) => ({
+      ...pot,
+      amount: Math.ceil(pot.amount / 2),
+    })),
+    run1Pots: pots.map((pot) => ({
+      ...pot,
+      amount: Math.floor(pot.amount / 2),
+    })),
+  }
+}
+
+function evaluateHandsForBoard(players: PlayerState[], board: Card[]): Map<string, { rank: number; description: string; raw: ReturnType<typeof evaluateHandWithRaw>['rawHand'] }> {
+  return new Map(
+    players
+      .filter((player): player is PlayerState & { holeCards: [Card, Card] } => !player.isFolded && player.holeCards !== null)
+      .map((player) => {
+        const { evaluation, rawHand } = evaluateHandWithRaw(player.holeCards, board)
+        return [
+          player.id,
+          {
+            rank: evaluation.rank,
+            description: evaluation.description,
+            raw: rawHand,
+          },
+        ] as const
+      })
+  )
+}
+
+function tagAwardsWithRunIndex(awards: PotAward[], runIndex: 0 | 1): PotAward[] {
+  return awards.map((award) => ({ ...award, runIndex }))
+}
+
+export function getRunItTwiceResults(game: GameState): GameState {
+  if (!game.firstBoard || !game.secondBoard) {
+    throw new Error('Run It Twice requires both boards before showdown')
+  }
+
+  const handPlayers = getCurrentHandPlayers(game.players)
+  const potPlayers = handPlayers.map(player => ({
+    ...player,
+    bet: player.totalBetThisHand,
+  }))
+  const pots = calculatePots(potPlayers)
+
+  if (pots.length === 0) {
+    return {
+      ...game,
+      phase: GamePhase.Showdown,
+      pot: 0,
+      sidePots: [],
+      activePlayerIndex: -1,
+      currentBet: 0,
+      playersToAct: [],
+      timerStart: null,
+      actionTimerStart: null,
+      players: game.players.map(player => ({
+        ...player,
+        bet: 0,
+      })),
+    }
+  }
+
+  const { run0Pots, run1Pots } = splitPotsForRunItTwice(pots)
+  const run0Evaluations = evaluateHandsForBoard(handPlayers, game.firstBoard)
+  const run1Evaluations = evaluateHandsForBoard(handPlayers, game.secondBoard)
+  const run0Awards = tagAwardsWithRunIndex(awardPots(run0Pots, run0Evaluations), 0)
+  const run1Awards = tagAwardsWithRunIndex(awardPots(run1Pots, run1Evaluations), 1)
+  const combinedAwards = [...run0Awards, ...run1Awards]
+  const combinedPots = [...run0Pots, ...run1Pots]
+  const updatedHandPlayers = distributePotWinnings(
+    handPlayers,
+    combinedPots,
+    combinedAwards.map(award => award.winnerIds),
+    game.dealerIndex
+  )
+
+  return {
+    ...game,
+    phase: GamePhase.Showdown,
+    pot: 0,
+    sidePots: pots,
+    activePlayerIndex: -1,
+    currentBet: 0,
+    playersToAct: [],
+    timerStart: null,
+    actionTimerStart: null,
+    players: mergePlayers(game.players, updatedHandPlayers),
+  }
+}
+
 /**
  * Applies a player's action and advances game state.
  *
@@ -512,7 +681,7 @@ export function getShowdownResults(game: GameState): GameState {
  *
  * @throws if the player isn't found, it's not their turn, or the action is invalid
  */
-export function handleAction(game: GameState, playerId: string, action: PlayerAction): GameState {
+export function handleAction(game: GameState, playerId: string, action: PlayerAction): HandleActionResult {
   const actingPlayer = getPlayerById(game.players, playerId)
 
   if (!actingPlayer) {
@@ -535,12 +704,34 @@ export function handleAction(game: GameState, playerId: string, action: PlayerAc
 
   const remainingPlayers = getRemainingPlayers(appliedGame)
   if (remainingPlayers.length === 1) {
-    return awardUncontestedPot(appliedGame, remainingPlayers[0])
+    return {
+      kind: 'showdown',
+      game: awardUncontestedPot(appliedGame, remainingPlayers[0]),
+    }
   }
 
   if (isRoundComplete(appliedInternalGame)) {
     if (appliedGame.phase === GamePhase.River) {
-      return getShowdownResults(appliedGame)
+      return {
+        kind: 'showdown',
+        game: getShowdownResults(appliedGame),
+      }
+    }
+
+    const canConsiderRunItTwiceDecision =
+      appliedGame.config.runItTwice &&
+      hasCommunityCardsRemainingToDeal(appliedGame.phase) &&
+      hasAnyRemainingPlayerAllIn(appliedGame)
+
+    const advancedInternalGame = advancePhase(appliedInternalGame)
+    const advancedGame = fromInternalGame(appliedGame, advancedInternalGame)
+    const nextActive = getNextActivePlayer(toInternalGame(advancedGame))
+
+    if (canConsiderRunItTwiceDecision && nextActive === -1) {
+      return {
+        kind: 'waitingForAction',
+        game: startRunItTwiceDecision(appliedGame),
+      }
     }
 
     // Advance exactly one street. If there is an active player after advancing
@@ -548,23 +739,27 @@ export function handleAction(game: GameState, playerId: string, action: PlayerAc
     // If not (full runout), return the intermediate state with activePlayerIndex=-1
     // so the socket handler can schedule the remaining streets with delays,
     // giving clients a chance to see each street dealt progressively.
-    const advancedInternalGame = advancePhase(appliedInternalGame)
-    const advancedGame = fromInternalGame(appliedGame, advancedInternalGame)
-    const nextActive = getNextActivePlayer(toInternalGame(advancedGame))
-
-    return {
+    const nextGame = {
       ...advancedGame,
       activePlayerIndex: nextActive,
       timerStart: null,
       actionTimerStart: null,
     }
+
+    return {
+      kind: nextGame.activePlayerIndex === -1 ? 'runout' : 'waitingForAction',
+      game: nextGame,
+    }
   }
 
   return {
-    ...appliedGame,
-    activePlayerIndex: getNextActivePlayer(appliedInternalGame),
-    timerStart: null,
-    actionTimerStart: null,
+    kind: 'waitingForAction',
+    game: {
+      ...appliedGame,
+      activePlayerIndex: getNextActivePlayer(appliedInternalGame),
+      timerStart: null,
+      actionTimerStart: null,
+    },
   }
 }
 
@@ -584,16 +779,83 @@ export function isHandComplete(game: GameState): boolean {
  * returns the final showdown result with the pot awarded.
  */
 export function advanceRunout(game: GameState): GameState {
-  if (game.phase === GamePhase.River) {
-    return getShowdownResults(game)
+  if (game.currentRunIndex === null || game.runoutPhase === null) {
+    if (game.phase === GamePhase.River) {
+      return getShowdownResults(game)
+    }
+
+    const internalGame = toInternalGame(game)
+    const advancedInternal = advancePhase(internalGame)
+    const advancedGame = fromInternalGame(game, advancedInternal)
+
+    return {
+      ...advancedGame,
+      activePlayerIndex: -1,
+      timerStart: null,
+      actionTimerStart: null,
+    }
   }
 
-  const internalGame = toInternalGame(game)
+  const basePhase = game.runoutPhase
+  const internalGame = toInternalGame({
+    ...game,
+    phase: basePhase,
+  })
   const advancedInternal = advancePhase(internalGame)
-  const advancedGame = fromInternalGame(game, advancedInternal)
+  const advancedGame = fromInternalGame(game, {
+    ...advancedInternal,
+    phase: game.phase,
+  })
+  const nextRunoutPhase = advancedInternal.phase
+
+  if (game.currentRunIndex === 0) {
+    const firstBoard = [...advancedGame.communityCards]
+
+    if (nextRunoutPhase === GamePhase.Showdown) {
+      const secondRunSeedCards = getRunItTwiceSecondRunSeedCards(firstBoard, game.runoutStartPhase)
+
+      return {
+        ...advancedGame,
+        phase: GamePhase.River,
+        runoutPhase: game.runoutStartPhase,
+        currentRunIndex: 1,
+        firstBoard,
+        secondBoard: secondRunSeedCards,
+        communityCards: secondRunSeedCards,
+        activePlayerIndex: -1,
+        timerStart: null,
+        actionTimerStart: null,
+      }
+    }
+
+    return {
+      ...advancedGame,
+      phase: GamePhase.River,
+      runoutPhase: nextRunoutPhase,
+      firstBoard,
+      activePlayerIndex: -1,
+      timerStart: null,
+      actionTimerStart: null,
+    }
+  }
+
+  const secondBoard = [...advancedGame.communityCards]
+
+  if (nextRunoutPhase === GamePhase.Showdown) {
+    return getRunItTwiceResults({
+      ...advancedGame,
+      secondBoard,
+      communityCards: secondBoard,
+      runoutPhase: null,
+      currentRunIndex: null,
+    })
+  }
 
   return {
     ...advancedGame,
+    phase: GamePhase.River,
+    runoutPhase: nextRunoutPhase,
+    secondBoard,
     activePlayerIndex: -1,
     timerStart: null,
     actionTimerStart: null,

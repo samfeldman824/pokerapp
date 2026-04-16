@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_CONFIG } from './constants'
-import { advanceDealer, createGame, getCurrentBlinds, getPlayerView, getShowdownResults, handleAction, isHandComplete, resetGame, startHand } from './gameController'
+import { advanceDealer, advanceRunout, createGame, getCurrentBlinds, getPlayerView, getRunItTwiceResults, getShowdownResults, handleAction as handleActionResult, isHandComplete, resetGame, startHand } from './gameController'
 import { makeGame } from './testUtils'
-import { ActionType, GamePhase, GameState, Rank, Suit } from './types'
+import { ActionType, GamePhase, GameState, PlayerAction, Rank, Suit } from './types'
 
 function bySeat(game: GameState, seatIndex: number) {
   const player = game.players.find(p => p.seatIndex === seatIndex)
@@ -11,6 +11,14 @@ function bySeat(game: GameState, seatIndex: number) {
     throw new Error(`Missing player at seat ${seatIndex}`)
   }
   return player
+}
+
+function handleAction(game: GameState, playerId: string, action: PlayerAction): GameState {
+  return handleActionResult(game, playerId, action).game
+}
+
+function handleActionWithResult(game: GameState, playerId: string, action: PlayerAction) {
+  return handleActionResult(game, playerId, action)
 }
 
 describe('gameController', () => {
@@ -578,8 +586,170 @@ describe('gameController', () => {
     expect(reset.players.map(p => p.seatIndex)).toEqual([0, 1, 2])
     expect(reset.config).toEqual(afterAction.config)
   })
-})
 
+  describe('run it twice', () => {
+    it('handleAction() returns discriminated result kinds and sets runout eligibility when all players are all-in with cards to come', () => {
+      const started = startHand(makeGame({ playerCount: 2, config: { runItTwice: true } }))
+      const activeSeat = started.activePlayerIndex
+      const otherSeat = activeSeat === 0 ? 1 : 0
+      const actingPlayer = bySeat(started, activeSeat)
+      const otherPlayer = bySeat(started, otherSeat)
+
+      const setup: GameState = {
+        ...started,
+        currentBet: 2,
+        players: started.players.map((p) => {
+          if (p.id === actingPlayer.id) {
+            return { ...p, chips: 49, bet: 1, totalBetThisHand: 1, isAllIn: false }
+          }
+          if (p.id === otherPlayer.id) {
+            return { ...p, chips: 48, bet: 2, totalBetThisHand: 2, isAllIn: false }
+          }
+          return p
+        }),
+      }
+
+      const afterAllIn = handleActionWithResult(setup, actingPlayer.id, { type: ActionType.Raise, amount: 50 })
+      expect(afterAllIn.kind).toBe('waitingForAction')
+      expect(afterAllIn.game.phase).toBe(GamePhase.Preflop)
+
+      const afterCall = handleActionWithResult(afterAllIn.game, otherPlayer.id, { type: ActionType.Call })
+      expect(afterCall.kind).toBe('waitingForAction')
+      expect(afterCall.game.runItTwiceDecisionPending).toBe(true)
+      expect(afterCall.game.runItTwiceEligible).toBe(false)
+      expect(afterCall.game.currentRunIndex).toBeNull()
+      expect(afterCall.game.runoutStartPhase).toBeNull()
+      expect(afterCall.game.runoutPhase).toBeNull()
+      expect(Object.keys(afterCall.game.runItTwiceVotes)).toHaveLength(2)
+      expect(afterCall.game.activePlayerIndex).toBe(-1)
+
+      const showdownByFold = handleActionWithResult(started, actingPlayer.id, { type: ActionType.Fold })
+      expect(showdownByFold.kind).toBe('showdown')
+      expect(showdownByFold.game.phase).toBe(GamePhase.Showdown)
+    })
+
+    it.each([
+      { startPhase: GamePhase.Preflop, expectedRunoutCalls: 8, expectedFirstBoardLength: 5, expectedSecondBoardLength: 5 },
+      { startPhase: GamePhase.Flop, expectedRunoutCalls: 6, expectedFirstBoardLength: 5, expectedSecondBoardLength: 5 },
+      { startPhase: GamePhase.Turn, expectedRunoutCalls: 4, expectedFirstBoardLength: 5, expectedSecondBoardLength: 5 },
+    ])(
+      'advanceRunout() handles $startPhase dual-board flow and reaches showdown',
+      ({ startPhase, expectedRunoutCalls, expectedFirstBoardLength, expectedSecondBoardLength }) => {
+        const started = startHand(makeGame({ playerCount: 2, config: { runItTwice: true } }))
+        const p0 = bySeat(started, 0)
+        const p1 = bySeat(started, 1)
+
+        const visibleCommunity = startPhase === GamePhase.Preflop
+          ? []
+          : (startPhase === GamePhase.Flop ? started.deck.slice(0, 3) : started.deck.slice(0, 4))
+        const remainingDeck = startPhase === GamePhase.Preflop
+          ? started.deck
+          : started.deck.slice(visibleCommunity.length)
+
+        let runoutGame: GameState = {
+          ...started,
+          phase: GamePhase.River,
+          communityCards: visibleCommunity,
+          deck: remainingDeck,
+          runItTwiceEligible: true,
+          currentRunIndex: 0,
+          runoutPhase: startPhase,
+          runoutStartPhase: startPhase,
+          firstBoard: null,
+          secondBoard: null,
+          activePlayerIndex: -1,
+          currentBet: 0,
+          playersToAct: [],
+          players: started.players.map((p) => {
+            if (p.id === p0.id) {
+              return { ...p, chips: 0, totalBetThisHand: 50, bet: 0, isAllIn: true, isFolded: false }
+            }
+            if (p.id === p1.id) {
+              return { ...p, chips: 0, totalBetThisHand: 50, bet: 0, isAllIn: true, isFolded: false }
+            }
+            return p
+          }),
+        }
+
+        for (let i = 0; i < expectedRunoutCalls; i += 1) {
+          runoutGame = advanceRunout(runoutGame)
+        }
+
+        expect(runoutGame.phase).toBe(GamePhase.Showdown)
+        expect(runoutGame.firstBoard).not.toBeNull()
+        expect(runoutGame.secondBoard).not.toBeNull()
+        expect(runoutGame.firstBoard).toHaveLength(expectedFirstBoardLength)
+        expect(runoutGame.secondBoard).toHaveLength(expectedSecondBoardLength)
+        expect(runoutGame.currentRunIndex).toBeNull()
+        expect(runoutGame.runoutPhase).toBeNull()
+      }
+    )
+
+    it('getRunItTwiceResults() splits odd chips to run 0 and combines payouts across both boards', () => {
+      const lobby = makeGame({ playerCount: 2, config: { runItTwice: true } })
+      const p0 = bySeat(lobby, 0)
+      const p1 = bySeat(lobby, 1)
+
+      const game: GameState = {
+        ...lobby,
+        phase: GamePhase.River,
+        runItTwiceEligible: true,
+        runoutStartPhase: GamePhase.Preflop,
+        firstBoard: [
+          { rank: Rank.Ace, suit: Suit.Hearts },
+          { rank: Rank.King, suit: Suit.Diamonds },
+          { rank: Rank.Two, suit: Suit.Clubs },
+          { rank: Rank.Three, suit: Suit.Hearts },
+          { rank: Rank.Four, suit: Suit.Spades },
+        ],
+        secondBoard: [
+          { rank: Rank.Queen, suit: Suit.Hearts },
+          { rank: Rank.Jack, suit: Suit.Diamonds },
+          { rank: Rank.Two, suit: Suit.Clubs },
+          { rank: Rank.Three, suit: Suit.Hearts },
+          { rank: Rank.Four, suit: Suit.Spades },
+        ],
+        players: lobby.players.map((p) => {
+          if (p.id === p0.id) {
+            return {
+              ...p,
+              chips: 0,
+              holeCards: [
+                { rank: Rank.Ace, suit: Suit.Spades },
+                { rank: Rank.King, suit: Suit.Spades },
+              ],
+              totalBetThisHand: 3,
+              bet: 0,
+              isFolded: false,
+              isAllIn: true,
+            }
+          }
+          if (p.id === p1.id) {
+            return {
+              ...p,
+              chips: 0,
+              holeCards: [
+                { rank: Rank.Queen, suit: Suit.Clubs },
+                { rank: Rank.Jack, suit: Suit.Clubs },
+              ],
+              totalBetThisHand: 2,
+              bet: 0,
+              isFolded: false,
+              isAllIn: true,
+            }
+          }
+          return p
+        }),
+      }
+
+      const showdown = getRunItTwiceResults(game)
+
+      expect(showdown.phase).toBe(GamePhase.Showdown)
+      expect(bySeat(showdown, 0).chips).toBe(3)
+      expect(bySeat(showdown, 1).chips).toBe(2)
+      expect(bySeat(showdown, 0).chips + bySeat(showdown, 1).chips).toBe(5)
+    })
+  })
   it('BUG REPRO: advances to flop (not showdown) when P0 goes all-in preflop and P1 calls with bigger stack', () => {
     const lobby = makeGame({ playerCount: 2 })
     const started = startHand(lobby)
@@ -605,3 +775,4 @@ describe('gameController', () => {
     expect(afterCall.activePlayerIndex).toBe(-1)
     expect(afterCall.communityCards).toHaveLength(3)
   })
+})

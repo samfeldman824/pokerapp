@@ -14,7 +14,14 @@
 
 import { eq, sql } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
-import type { GameConfig, GameState, HandResult, PlayerState } from '../engine/types'
+import type {
+  CompletedHandBoard,
+  GameConfig,
+  GameState,
+  HandResult,
+  PersistedHandResultBoard,
+  PlayerState,
+} from '../engine/types'
 import { DEFAULT_CONFIG } from '../engine/constants'
 import { GamePhase } from '../engine/types'
 import { db } from './index'
@@ -90,6 +97,14 @@ export async function loadPersistedGame(gameId: string): Promise<GameState | nul
       config,
       spectators: [],
       shownCards: snapshot.shownCards ?? {},
+      runItTwiceEligible: snapshot.runItTwiceEligible ?? false,
+      runItTwiceDecisionPending: snapshot.runItTwiceDecisionPending ?? false,
+      runItTwiceVotes: snapshot.runItTwiceVotes ?? {},
+      currentRunIndex: snapshot.currentRunIndex ?? null,
+      runoutPhase: snapshot.runoutPhase ?? null,
+      runoutStartPhase: snapshot.runoutStartPhase ?? null,
+      firstBoard: snapshot.firstBoard ?? null,
+      secondBoard: snapshot.secondBoard ?? null,
       deck: [],
     }
   }
@@ -134,6 +149,14 @@ export async function loadPersistedGame(gameId: string): Promise<GameState | nul
     players: persistedPlayers,
     spectators: [],
     communityCards: [],
+    runItTwiceEligible: false,
+    runItTwiceDecisionPending: false,
+    runItTwiceVotes: {},
+    currentRunIndex: null,
+    runoutPhase: null,
+    runoutStartPhase: null,
+    firstBoard: null,
+    secondBoard: null,
     pot: 0,
     sidePots: [],
     dealerIndex: -1,
@@ -198,6 +221,7 @@ export async function saveHand(game: GameState): Promise<string> {
     handNumber: game.handNumber,
     dealerSeatIndex: game.dealerIndex,
     communityCards: game.communityCards,
+    boards: [],
     potTotal: game.pot,
     createdAt,
   })
@@ -235,6 +259,11 @@ export async function saveHandAction(
  */
 export async function saveHandResults(
   handId: string,
+  handData: {
+    communityCards: GameState['communityCards']
+    boards: CompletedHandBoard[]
+    potTotal: number
+  },
   results: HandResult[],
 ): Promise<void> {
   const completedAt = new Date()
@@ -246,6 +275,13 @@ export async function saveHandResults(
           handId,
           playerId: result.playerId,
           holeCards: result.holeCards,
+          boardResults: result.boardResults.map<PersistedHandResultBoard>((boardResult) => ({
+            runIndex: boardResult.runIndex,
+            handRank: boardResult.evaluation?.rank ?? null,
+            handDescription: boardResult.evaluation?.description ?? null,
+            winnings: boardResult.winnings,
+            potAwards: boardResult.potAwards,
+          })),
           handRank: result.evaluation?.rank ?? null,
           handDescription: result.evaluation?.description ?? null,
           winnings: result.winnings,
@@ -255,7 +291,12 @@ export async function saveHandResults(
 
     await tx
       .update(hands)
-      .set({ completedAt })
+      .set({
+        completedAt,
+        communityCards: handData.communityCards,
+        boards: handData.boards,
+        potTotal: handData.potTotal,
+      })
       .where(eq(hands.id, handId))
   })
 }

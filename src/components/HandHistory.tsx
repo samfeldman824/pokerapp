@@ -1,12 +1,7 @@
 import { useEffect, useState } from 'react'
 
-type HandSummary = {
-  handNumber: number
-  potTotal: number
-  communityCards: Array<{ suit: string; rank: string }> | null
-  winners: Array<{ displayName: string; winnings: number }>
-  completedAt: string
-}
+import type { Card } from '@/engine/types'
+import type { HandHistoryDetail, HandHistoryPlayerBoardResult, HandHistorySummary } from '@/lib/handHistory'
 
 type HandAction = {
   phase: string
@@ -14,23 +9,6 @@ type HandAction = {
   amount: number | null
   displayName: string
   ordering: number
-}
-
-type HandResult = {
-  displayName: string
-  holeCards: Array<{ suit: string; rank: string }> | null
-  handRank: number | null
-  handDescription: string | null
-  winnings: number
-}
-
-type HandDetail = {
-  handNumber: number
-  potTotal: number
-  communityCards: Array<{ suit: string; rank: string }> | null
-  completedAt: string
-  actions: HandAction[]
-  results: HandResult[]
 }
 
 type HandHistoryProps = {
@@ -61,13 +39,38 @@ function formatAction(action: HandAction): string {
   }
 }
 
+function formatCard(card: Card): string {
+  const suit = {
+    clubs: 'c',
+    diamonds: 'd',
+    hearts: 'h',
+    spades: 's',
+  }[card.suit]
+
+  return `${card.rank}${suit}`
+}
+
+function formatCards(cards: Card[]): string {
+  if (cards.length === 0) {
+    return 'No board dealt'
+  }
+
+  return cards.map(formatCard).join(' ')
+}
+
+function formatBoardResult(boardResult: HandHistoryPlayerBoardResult): string {
+  const description = boardResult.handDescription ?? 'No showdown hand'
+  const winnings = boardResult.winnings > 0 ? ` (+${formatChips(boardResult.winnings)})` : ''
+  return `${description}${winnings}`
+}
+
 export function HandHistory({ gameId, onClose }: HandHistoryProps) {
-  const [hands, setHands] = useState<HandSummary[]>([])
+  const [hands, setHands] = useState<HandHistorySummary[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const [expandedHand, setExpandedHand] = useState<number | null>(null)
-  const [detailsCache, setDetailsCache] = useState<Record<number, HandDetail>>({})
+  const [detailsCache, setDetailsCache] = useState<Record<number, HandHistoryDetail>>({})
   const [loadingDetails, setLoadingDetails] = useState<Record<number, boolean>>({})
 
   useEffect(() => {
@@ -79,7 +82,7 @@ export function HandHistory({ gameId, onClose }: HandHistoryProps) {
         setError(null)
         const response = await fetch(`/api/games/${gameId}/hands`)
         if (!response.ok) throw new Error('Failed to load hand history')
-        const data: HandSummary[] = await response.json()
+        const data: HandHistorySummary[] = await response.json()
         if (isMounted) setHands(data.reverse())
       } catch (err) {
         if (isMounted) setError(err instanceof Error ? err.message : 'Failed to load hand history')
@@ -105,7 +108,7 @@ export function HandHistory({ gameId, onClose }: HandHistoryProps) {
       try {
         const response = await fetch(`/api/games/${gameId}/hands/${handNumber}`)
         if (!response.ok) throw new Error('Failed to load hand detail')
-        const data: HandDetail = await response.json()
+          const data: HandHistoryDetail = await response.json()
         setDetailsCache(prev => ({ ...prev, [handNumber]: data }))
       } catch (err) {
         console.error(err)
@@ -165,14 +168,19 @@ export function HandHistory({ gameId, onClose }: HandHistoryProps) {
                             Pot: {formatChips(hand.potTotal)}
                           </div>
                         </div>
-                        {hand.winners.length > 0 && (
-                          <div className="hidden sm:block text-left border-l border-white/10 pl-6">
-                            <div className="text-xs uppercase tracking-wider text-gray-500">Winners</div>
-                            <div className="text-sm text-gray-300 mt-0.5">
-                              {hand.winners.map(w => `${w.displayName} (+${formatChips(w.winnings)})`).join(', ')}
-                            </div>
+                        <div className="hidden sm:block text-left border-l border-white/10 pl-6">
+                          <div className="text-xs uppercase tracking-wider text-gray-500">Boards</div>
+                          <div className="mt-0.5 space-y-1 text-sm text-gray-300">
+                            {hand.boards.map((board) => (
+                              <div key={board.runIndex}>
+                                <span className="text-gray-500">Run {board.runIndex + 1}:</span>{' '}
+                                <span>{board.winners.length === 0
+                                  ? formatCards(board.communityCards)
+                                  : `${formatCards(board.communityCards)} • ${board.winners.map((winner) => `${winner.displayName} (+${formatChips(winner.winnings)})`).join(', ')}`}</span>
+                              </div>
+                            ))}
                           </div>
-                        )}
+                        </div>
                       </div>
                       <div className="text-gray-500 transition-transform duration-200" style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>
                         ▼
@@ -187,6 +195,15 @@ export function HandHistory({ gameId, onClose }: HandHistoryProps) {
                           </div>
                         ) : detail ? (
                           <div className="space-y-6">
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              {detail.boards.map((board) => (
+                                <div key={board.runIndex} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Run {board.runIndex + 1}</div>
+                                  <div className="mt-2 text-sm font-medium text-white">{formatCards(board.communityCards)}</div>
+                                </div>
+                              ))}
+                            </div>
+
                             <div>
                               <h4 className="text-xs uppercase tracking-[0.2em] text-gray-500 mb-3">Action Timeline</h4>
                               <div className="space-y-4">
@@ -216,6 +233,35 @@ export function HandHistory({ gameId, onClose }: HandHistoryProps) {
                                 {detail.actions.length === 0 && (
                                   <div className="text-sm text-gray-500 ml-2">No actions recorded</div>
                                 )}
+                              </div>
+                            </div>
+
+                            <div>
+                              <h4 className="text-xs uppercase tracking-[0.2em] text-gray-500 mb-3">Showdown Results</h4>
+                              <div className="space-y-3">
+                                {detail.results.map((result) => (
+                                  <div key={result.displayName} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                      <div>
+                                        <div className="text-sm font-medium text-white">{result.displayName}</div>
+                                        <div className="mt-1 text-xs text-gray-500">
+                                          {result.holeCards ? formatCards(result.holeCards) : 'Folded / mucked'}
+                                        </div>
+                                      </div>
+                                      <div className="text-sm font-medium text-emerald-300">
+                                        {result.winnings > 0 ? `+${formatChips(result.winnings)}` : formatChips(result.winnings)}
+                                      </div>
+                                    </div>
+                                    <div className="mt-3 space-y-1 text-sm text-gray-300">
+                                      {result.boardResults.map((boardResult) => (
+                                        <div key={boardResult.runIndex}>
+                                          <span className="text-gray-500">Run {boardResult.runIndex + 1}:</span>{' '}
+                                          <span>{formatBoardResult(boardResult)}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ))}
                               </div>
                             </div>
                           </div>

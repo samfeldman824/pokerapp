@@ -13,19 +13,12 @@
 
 import { Hand } from 'pokersolver'
 
-import { PlayerState, SidePot } from './types'
+import { PlayerState, SidePot, PotAward } from './types'
 
 interface HandEvaluationWithRaw {
   rank: number
   description: string
   raw: Hand
-}
-
-export interface PotAward {
-  potIndex: number
-  amount: number
-  winnerIds: string[]
-  handDescription: string
 }
 
 /** Returns unique values sorted smallest → largest. */
@@ -178,6 +171,7 @@ export function awardPots(
 
     return {
       potIndex,
+      runIndex: 0,
       amount: pot.amount,
       winnerIds: winners.map(winner => winner.playerId),
       handDescription: winners[0].description,

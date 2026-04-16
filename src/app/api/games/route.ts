@@ -47,6 +47,7 @@ export async function POST(req: NextRequest) {
       timePerAction, 
       betweenHandsDelay,
       maxPlayers, 
+      runItTwice,
       hostDisplayName, 
       hostSeatIndex,
       blindSchedule,
@@ -79,6 +80,9 @@ export async function POST(req: NextRequest) {
     if (typeof hostSeatIndex !== 'number' || hostSeatIndex < 0 || hostSeatIndex >= maxPlayers) {
       return NextResponse.json({ error: 'Invalid hostSeatIndex' }, { status: 400 });
     }
+    if (runItTwice !== undefined && typeof runItTwice !== 'boolean') {
+      return NextResponse.json({ error: 'runItTwice must be a boolean when provided' }, { status: 400 });
+    }
 
     if (blindSchedule !== undefined) {
       if (!Array.isArray(blindSchedule) || blindSchedule.length === 0) {
@@ -96,6 +100,7 @@ export async function POST(req: NextRequest) {
       timePerAction,
       betweenHandsDelay,
       maxPlayers,
+      runItTwice: runItTwice ?? false,
       ...(blindSchedule && { blindSchedule, blindIncreaseInterval }),
     };
 

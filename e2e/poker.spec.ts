@@ -4,7 +4,8 @@ import { test, expect, BrowserContext, Page } from '@playwright/test';
 // Helpers
 // ---------------------------------------------------------------------------
 
-async function createGame(page: Page): Promise<string> {
+async function createGame(page: Page, options: { runItTwice?: boolean } = {}): Promise<string> {
+  const { runItTwice = false } = options;
   const createResponse = await page.request.post('/api/games', {
     data: {
       hostDisplayName: 'Alice',
@@ -15,6 +16,7 @@ async function createGame(page: Page): Promise<string> {
       timePerAction: 30,
       betweenHandsDelay: 3,
       maxPlayers: 9,
+      runItTwice,
     },
   });
 
@@ -435,6 +437,97 @@ test('occupied seat is disabled in join modal', async ({ browser }) => {
 
     const seat1Btn = guestPage.getByRole('button', { name: 'Seat 1' });
     await expect(seat1Btn).toBeDisabled({ timeout: 5000 });
+  } finally {
+    await closeContextSafely(ctx1);
+    await closeContextSafely(ctx2);
+  }
+});
+
+test('run it twice flow emits board results twice before final hand result', async ({ browser }) => {
+  test.setTimeout(180000);
+
+  const ctx1: BrowserContext = await browser.newContext();
+  const ctx2: BrowserContext = await browser.newContext();
+  const hostPage: Page = await ctx1.newPage();
+  const guestPage: Page = await ctx2.newPage();
+
+  const socketTimeline: Array<'runItTwiceStarted' | 'boardResult' | 'hand-result'> = [];
+  const seenFramePayloads = new Set<string>();
+
+  const attachSocketCapture = (page: Page) => {
+    page.on('websocket', (ws) => {
+      ws.on('framereceived', ({ payload }) => {
+        if (typeof payload !== 'string') return;
+
+        // De-duplicate retransmitted frames while preserving first-seen order.
+        if (seenFramePayloads.has(payload)) return;
+        seenFramePayloads.add(payload);
+
+        if (payload.includes('"runItTwiceStarted"')) {
+          socketTimeline.push('runItTwiceStarted');
+        }
+        if (payload.includes('"boardResult"')) {
+          socketTimeline.push('boardResult');
+        }
+        if (payload.includes('"hand-result"')) {
+          socketTimeline.push('hand-result');
+        }
+      });
+    });
+  };
+
+  try {
+    attachSocketCapture(hostPage);
+
+    const gameId = await createGame(hostPage, { runItTwice: true });
+    await joinGame(guestPage, gameId, 'Bob', 1);
+
+    await hostPage.getByRole('button', { name: /start game/i }).click();
+    await expect(hostPage.getByText(/waiting for host/i)).not.toBeVisible({ timeout: 15000 });
+
+    const hostFold = hostPage.getByRole('button', { name: /^fold$/i }).first();
+    const guestFold = guestPage.getByRole('button', { name: /^fold$/i }).first();
+    const hostActs = await hostFold.isVisible() && await hostFold.isEnabled();
+    const actingPage = hostActs ? hostPage : guestPage;
+    const respondingPage = actingPage === hostPage ? guestPage : hostPage;
+
+    const raiseButton = actingPage.getByRole('button', { name: /^raise/i }).first();
+    const allInButton = actingPage.getByRole('button', { name: /^all-in/i }).first();
+    await expect(raiseButton).toBeEnabled({ timeout: 15000 });
+    await raiseButton.click();
+    await expect(allInButton).toBeEnabled({ timeout: 10000 });
+    await allInButton.click();
+    await expect(raiseButton).toBeEnabled({ timeout: 10000 });
+    await raiseButton.click();
+
+    const callButton = respondingPage.getByRole('button', { name: /^call/i }).first();
+    await expect(callButton).toBeEnabled({ timeout: 15000 });
+    await callButton.click();
+
+    await expect(hostPage.getByText('Run 1', { exact: true })).toBeVisible({ timeout: 20000 });
+    await expect(hostPage.getByText('Run 2', { exact: true })).toBeVisible({ timeout: 20000 });
+
+    await expect.poll(
+      () => socketTimeline.filter((eventName) => eventName === 'boardResult').length,
+      { timeout: 45000 }
+    ).toBeGreaterThanOrEqual(2);
+
+    await expect.poll(
+      () => socketTimeline.includes('hand-result'),
+      { timeout: 45000 }
+    ).toBeTruthy();
+
+    await expect(hostPage.getByText(/Run 1 Awards/i)).toBeVisible({ timeout: 20000 });
+    await expect(hostPage.getByText(/Run 2 Awards/i)).toBeVisible({ timeout: 20000 });
+
+    const runStartedAt = socketTimeline.indexOf('runItTwiceStarted');
+    const firstBoardAt = socketTimeline.indexOf('boardResult');
+    const handResultAt = socketTimeline.indexOf('hand-result');
+
+    expect(runStartedAt).toBeGreaterThanOrEqual(0);
+    expect(firstBoardAt).toBeGreaterThan(runStartedAt);
+    expect(handResultAt).toBeGreaterThan(firstBoardAt);
+    expect(socketTimeline.slice(0, handResultAt).filter((eventName) => eventName === 'boardResult').length).toBeGreaterThanOrEqual(2);
   } finally {
     await closeContextSafely(ctx1);
     await closeContextSafely(ctx2);

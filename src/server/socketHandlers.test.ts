@@ -18,9 +18,12 @@ import { io as ioc, type Socket as ClientSocket } from 'socket.io-client'
 
 import { createGame } from '../engine/gameController'
 import { DEFAULT_CONFIG } from '../engine/constants'
+import { saveHandResults } from '../db/persistence'
 import { ActionType, GamePhase, type ClientGameState, type GameConfig, type HandResult, type PlayerAction } from '../engine/types'
 import { gameStore } from './gameStore'
 import { registerSocketHandlers } from './socketHandlers'
+
+const saveHandResultsMock = vi.mocked(saveHandResults)
 
 type JoinGamePayload = {
   gameId: string
@@ -49,15 +52,27 @@ type ClientToServerEvents = {
   'player-action': (payload: PlayerActionPayload) => void
   'pause-game': (payload: GamePlayerPayload) => void
   'resume-game': (payload: GamePlayerPayload) => void
+  'reset-game': (payload: GamePlayerPayload) => void
+  'update-config': (payload: { gameId: string; playerId: string; config: { runItTwice?: boolean } }) => void
+  'run-it-twice-decision': (payload: { gameId: string; playerId: string; agree: boolean }) => void
 }
 
 type ServerToClientEvents = {
   joined: (payload: { playerId: string }) => void
   'game-state': (payload: ClientGameState) => void
+  runItTwiceStarted: (payload: { gameId: string }) => void
+  runItTwiceDecisionStarted: (payload: { gameId: string; playerIds: string[] }) => void
+  runItTwiceDecisionUpdated: (payload: { gameId: string; playerId: string; agree: boolean }) => void
+  boardResult: (payload: {
+    gameId: string
+    runIndex: 0 | 1
+    board: ClientGameState['communityCards']
+    potAwards: HandResult['potAwards']
+  }) => void
   'hand-result': (payload: {
     gameId: string
     handNumber: number
-    communityCards: ClientGameState['communityCards']
+    boards: Array<{ runIndex: 0 | 1; communityCards: ClientGameState['communityCards'] }>
     results: HandResult[]
   }) => void
   error: (payload: { message: string }) => void
@@ -70,6 +85,7 @@ type CapturedEvent = keyof ServerToClientEvents
 type SocketEventState = {
   queues: Record<CapturedEvent, unknown[]>
   waiters: Record<CapturedEvent, Array<(payload: unknown) => void>>
+  timeline: CapturedEvent[]
 }
 
 const socketEventState = new WeakMap<TestClientSocket, SocketEventState>()
@@ -84,15 +100,24 @@ function ensureSocketEventState(socket: TestClientSocket): SocketEventState {
     queues: {
       joined: [],
       'game-state': [],
+      runItTwiceStarted: [],
+      runItTwiceDecisionStarted: [],
+      runItTwiceDecisionUpdated: [],
+      boardResult: [],
       'hand-result': [],
       error: [],
     },
     waiters: {
       joined: [],
       'game-state': [],
+      runItTwiceStarted: [],
+      runItTwiceDecisionStarted: [],
+      runItTwiceDecisionUpdated: [],
+      boardResult: [],
       'hand-result': [],
       error: [],
     },
+    timeline: [],
   }
 
   socketEventState.set(socket, created)
@@ -102,10 +127,12 @@ function ensureSocketEventState(socket: TestClientSocket): SocketEventState {
       const state = ensureSocketEventState(socket)
       const waiter = state.waiters[event].shift()
       if (waiter) {
+        state.timeline.push(event)
         waiter(payload)
         return
       }
 
+      state.timeline.push(event)
       state.queues[event].push(payload)
     }) as unknown as ServerToClientEvents[K]
 
@@ -118,6 +145,10 @@ function ensureSocketEventState(socket: TestClientSocket): SocketEventState {
 
   capture('joined')
   capture('game-state')
+  capture('runItTwiceStarted')
+  capture('runItTwiceDecisionStarted')
+  capture('runItTwiceDecisionUpdated')
+  capture('boardResult')
   capture('hand-result')
   capture('error')
 
@@ -152,6 +183,24 @@ function waitForEvent<K extends keyof ServerToClientEvents>(
 
     state.waiters[event].push(onPayload)
   })
+}
+
+async function waitForGameStateWhere(
+  socket: TestClientSocket,
+  predicate: (state: ClientGameState) => boolean,
+  timeoutMs: number = 10_000,
+): Promise<ClientGameState> {
+  const deadline = Date.now() + timeoutMs
+
+  while (Date.now() < deadline) {
+    const remaining = Math.max(1, deadline - Date.now())
+    const state = await waitForEvent(socket, 'game-state', remaining)
+    if (predicate(state)) {
+      return state
+    }
+  }
+
+  throw new Error('Timed out waiting for matching game-state')
 }
 
 async function joinGame(
@@ -285,6 +334,7 @@ describe('registerSocketHandlers (integration)', () => {
   beforeEach(() => {
     clients = []
     gameIds = []
+    vi.clearAllMocks()
   })
 
   afterEach(async () => {
@@ -686,7 +736,10 @@ describe('registerSocketHandlers (integration)', () => {
 
     expect(handResult.handNumber).toBe(1)
     expect(handResult.results).toHaveLength(2)
-    expect(handResult.communityCards).toHaveLength(5)
+    expect(handResult.boards).toEqual([
+      expect.objectContaining({ runIndex: 0, communityCards: expect.any(Array) }),
+    ])
+    expect(handResult.boards[0].communityCards).toHaveLength(5)
 
     const p0 = findPlayerBySeat(finalState, 0)
     const p3 = findPlayerBySeat(finalState, 3)
@@ -1218,10 +1271,34 @@ describe('registerSocketHandlers (integration)', () => {
     await waitForEvent(other, 'game-state')
 
     const liveGame = gameStore.get(gameId)!
-    const preflopActorId = findPlayerBySeat(state, state.activePlayerIndex).id
+    const preflopActor = findPlayerBySeat(state, state.activePlayerIndex)
+    const preflopOther = state.players.find((player) => player !== null && player.id !== preflopActor.id)
+    if (!preflopOther) {
+      throw new Error('Expected two seated players')
+    }
+
+    const actorSeatPlayer = liveGame.players.find((player) => player.id === preflopActor.id)
+    const otherSeatPlayer = liveGame.players.find((player) => player.id === preflopOther.id)
+    if (!actorSeatPlayer || !otherSeatPlayer) {
+      throw new Error('Missing live players for preflop setup')
+    }
+
+    const actorChipsForAllInTo50 = 50 - actorSeatPlayer.bet
+    const otherChipsForCallAllIn = 50 - otherSeatPlayer.bet
+
     gameStore.set(gameId, {
       ...liveGame,
-      players: liveGame.players.map((p) => (p.id === preflopActorId ? { ...p, chips: 49 } : p)),
+      players: liveGame.players.map((p) => {
+        if (p.id === preflopActor.id) {
+          return { ...p, chips: actorChipsForAllInTo50 }
+        }
+
+        if (p.id === preflopOther.id) {
+          return { ...p, chips: otherChipsForCallAllIn }
+        }
+
+        return p
+      }),
     })
 
     const act = async (action: PlayerAction): Promise<ClientGameState> => {
@@ -1266,4 +1343,659 @@ describe('registerSocketHandlers (integration)', () => {
     expect(showdownState.communityCards).toHaveLength(5)
     void otherId
   }, 15_000)
+
+  it('run it twice: boardResult events are emitted for both runs and hand-result potAwards include both run indexes', async () => {
+    const gameId = seedGame({ betweenHandsDelay: 60, runItTwice: true })
+    gameIds.push(gameId)
+
+    const host = createClient(port)
+    const other = createClient(port)
+    clients.push(host, other)
+
+    const { playerId: hostId } = await joinGame(host, gameId, 'Host', 0)
+    await waitForEvent(host, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    await joinGame(other, gameId, 'Other', 3)
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    host.emit('start-game', { gameId, playerId: hostId })
+    let state = await waitForEvent(host, 'game-state')
+    await waitForEvent(other, 'game-state')
+
+    const liveGame = gameStore.get(gameId)!
+    const preflopActor = findPlayerBySeat(state, state.activePlayerIndex)
+    const preflopOther = state.players.find((player) => player !== null && player.id !== preflopActor.id)
+    if (!preflopOther) {
+      throw new Error('Expected two seated players')
+    }
+
+    const actorSeatPlayer = liveGame.players.find((player) => player.id === preflopActor.id)
+    const otherSeatPlayer = liveGame.players.find((player) => player.id === preflopOther.id)
+    if (!actorSeatPlayer || !otherSeatPlayer) {
+      throw new Error('Missing live players for preflop setup')
+    }
+
+    const actorChipsForAllInTo50 = 50 - actorSeatPlayer.bet
+    const otherChipsForCallAllIn = 50 - otherSeatPlayer.bet
+
+    gameStore.set(gameId, {
+      ...liveGame,
+      players: liveGame.players.map((p) => {
+        if (p.id === preflopActor.id) {
+          return { ...p, chips: actorChipsForAllInTo50 }
+        }
+
+        if (p.id === preflopOther.id) {
+          return { ...p, chips: otherChipsForCallAllIn }
+        }
+
+        return p
+      }),
+    })
+
+    const act = async (action: PlayerAction): Promise<ClientGameState> => {
+      const actingPlayer = findPlayerBySeat(state, state.activePlayerIndex)
+      const socket = actingPlayer.id === hostId ? host : other
+      const hostNext = waitForEvent(host, 'game-state')
+      const otherNext = waitForEvent(other, 'game-state')
+      socket.emit('player-action', { gameId, playerId: actingPlayer.id, action })
+      const [hostState] = await Promise.all([hostNext, otherNext])
+      state = hostState
+      return hostState
+    }
+
+    state = await act({ type: ActionType.Raise, amount: 50 })
+    expect(state.phase).toBe(GamePhase.Preflop)
+
+    const decisionStartedP = waitForEvent(host, 'runItTwiceDecisionStarted')
+    state = await act({ type: ActionType.Call })
+    const decisionStarted = await decisionStartedP
+    expect(new Set(decisionStarted.playerIds).size).toBe(2)
+    expect(state.runItTwiceDecisionPending).toBe(true)
+
+    const nonActorId = preflopOther.id
+    const actorSocket = preflopActor.id === hostId ? host : other
+    const otherSocket = nonActorId === hostId ? host : other
+
+    actorSocket.emit('run-it-twice-decision', { gameId, playerId: preflopActor.id, agree: true })
+    await waitForEvent(host, 'runItTwiceDecisionUpdated')
+    otherSocket.emit('run-it-twice-decision', { gameId, playerId: nonActorId, agree: true })
+    await waitForEvent(host, 'runItTwiceDecisionUpdated')
+
+    const runItTwiceStartedP = waitForEvent(host, 'runItTwiceStarted')
+    await runItTwiceStartedP
+
+    const boardResultOne = await waitForEvent(host, 'boardResult', 10_000)
+    const boardResultTwo = await waitForEvent(host, 'boardResult', 10_000)
+    const handResult = await waitForEvent(host, 'hand-result', 10_000)
+
+    expect(boardResultOne.runIndex).toBe(0)
+    expect(boardResultTwo.runIndex).toBe(1)
+    expect(boardResultOne.potAwards.every((award) => award.runIndex === 0)).toBe(true)
+    expect(boardResultTwo.potAwards.every((award) => award.runIndex === 1)).toBe(true)
+    expect(handResult.boards).toEqual([
+      { runIndex: 0, communityCards: boardResultOne.board },
+      { runIndex: 1, communityCards: boardResultTwo.board },
+    ])
+    expect(handResult.results.every((result) => result.boardResults.length === 2)).toBe(true)
+    expect(handResult.results.some((result) => result.boardResults.length === 2)).toBe(true)
+
+    const allHandResultAwards = handResult.results.flatMap((result) => result.potAwards)
+    const seenRunIndexes = new Set(allHandResultAwards.map((award) => award.runIndex))
+    expect(seenRunIndexes.has(0)).toBe(true)
+    expect(seenRunIndexes.has(1)).toBe(true)
+
+    expect(saveHandResultsMock).toHaveBeenCalledWith(
+      'hand-id',
+      expect.objectContaining({
+        boards: [
+          { runIndex: 0, communityCards: boardResultOne.board },
+          { runIndex: 1, communityCards: boardResultTwo.board },
+        ],
+        potTotal: expect.any(Number),
+      }),
+      expect.arrayContaining([
+        expect.objectContaining({
+          boardResults: expect.arrayContaining([
+            expect.objectContaining({ runIndex: 0 }),
+            expect.objectContaining({ runIndex: 1 }),
+          ]),
+        }),
+      ]),
+    )
+
+    const hostEvents = ensureSocketEventState(host).timeline
+    const firstBoardEventIndex = hostEvents.indexOf('boardResult')
+    const secondBoardEventIndex = hostEvents.findIndex((event, idx) => event === 'boardResult' && idx > firstBoardEventIndex)
+    const handResultEventIndex = hostEvents.findIndex((event, idx) => event === 'hand-result' && idx > secondBoardEventIndex)
+
+    expect(firstBoardEventIndex).toBeGreaterThanOrEqual(0)
+    expect(secondBoardEventIndex).toBeGreaterThan(firstBoardEventIndex)
+    expect(handResultEventIndex).toBeGreaterThan(secondBoardEventIndex)
+  }, 20_000)
+
+  it('run it twice: pause and resume mid-runout continues progression to showdown', async () => {
+    const gameId = seedGame({ betweenHandsDelay: 60, runItTwice: true })
+    gameIds.push(gameId)
+
+    const host = createClient(port)
+    const other = createClient(port)
+    clients.push(host, other)
+
+    const { playerId: hostId } = await joinGame(host, gameId, 'Host', 0)
+    await waitForEvent(host, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    await joinGame(other, gameId, 'Other', 3)
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    host.emit('start-game', { gameId, playerId: hostId })
+    let state = await waitForEvent(host, 'game-state')
+    await waitForEvent(other, 'game-state')
+
+    const liveGame = gameStore.get(gameId)!
+    const preflopActor = findPlayerBySeat(state, state.activePlayerIndex)
+    const preflopOther = state.players.find((player) => player !== null && player.id !== preflopActor.id)
+    if (!preflopOther) {
+      throw new Error('Expected two seated players')
+    }
+
+    const actorSeatPlayer = liveGame.players.find((player) => player.id === preflopActor.id)
+    const otherSeatPlayer = liveGame.players.find((player) => player.id === preflopOther.id)
+    if (!actorSeatPlayer || !otherSeatPlayer) {
+      throw new Error('Missing live players for preflop setup')
+    }
+
+    const actorChipsForAllInTo50 = 50 - actorSeatPlayer.bet
+    const otherChipsForCallAllIn = 50 - otherSeatPlayer.bet
+
+    gameStore.set(gameId, {
+      ...liveGame,
+      players: liveGame.players.map((p) => {
+        if (p.id === preflopActor.id) {
+          return { ...p, chips: actorChipsForAllInTo50 }
+        }
+        if (p.id === preflopOther.id) {
+          return { ...p, chips: otherChipsForCallAllIn }
+        }
+        return p
+      }),
+    })
+
+    const act = async (action: PlayerAction): Promise<ClientGameState> => {
+      const actingPlayer = findPlayerBySeat(state, state.activePlayerIndex)
+      const socket = actingPlayer.id === hostId ? host : other
+      const hostNext = waitForEvent(host, 'game-state')
+      const otherNext = waitForEvent(other, 'game-state')
+      socket.emit('player-action', { gameId, playerId: actingPlayer.id, action })
+      const [hostState] = await Promise.all([hostNext, otherNext])
+      state = hostState
+      return hostState
+    }
+
+    state = await act({ type: ActionType.Raise, amount: 50 })
+    state = await act({ type: ActionType.Call })
+    expect(state.runItTwiceDecisionPending).toBe(true)
+    expect(state.activePlayerIndex).toBe(-1)
+
+    const actorSocket = preflopActor.id === hostId ? host : other
+    const otherSocket = preflopOther.id === hostId ? host : other
+
+    actorSocket.emit('run-it-twice-decision', { gameId, playerId: preflopActor.id, agree: true })
+    await waitForEvent(host, 'runItTwiceDecisionUpdated')
+    otherSocket.emit('run-it-twice-decision', { gameId, playerId: preflopOther.id, agree: true })
+    await waitForEvent(host, 'runItTwiceDecisionUpdated')
+    await waitForEvent(host, 'runItTwiceStarted')
+
+    host.emit('pause-game', { gameId, playerId: hostId })
+    const pausedState = await waitForGameStateWhere(host, (next) => next.isPaused === true)
+    await waitForGameStateWhere(other, (next) => next.isPaused === true)
+    expect(pausedState.isPaused).toBe(true)
+
+    await new Promise((resolve) => setTimeout(resolve, 200))
+
+    host.emit('resume-game', { gameId, playerId: hostId })
+    const resumedState = await waitForGameStateWhere(host, (next) => next.isPaused === false)
+    await waitForGameStateWhere(other, (next) => next.isPaused === false)
+    expect(resumedState.isPaused).toBe(false)
+
+    const firstBoard = await waitForEvent(host, 'boardResult', 10_000)
+    const secondBoard = await waitForEvent(host, 'boardResult', 10_000)
+    const handResult = await waitForEvent(host, 'hand-result', 10_000)
+    expect(firstBoard.runIndex).toBe(0)
+    expect(secondBoard.runIndex).toBe(1)
+    expect(handResult.gameId).toBe(gameId)
+  }, 20_000)
+
+  it('run it twice: one decline falls back to normal single-board runout', async () => {
+    const gameId = seedGame({ betweenHandsDelay: 60, runItTwice: true })
+    gameIds.push(gameId)
+
+    const host = createClient(port)
+    const other = createClient(port)
+    clients.push(host, other)
+
+    const { playerId: hostId } = await joinGame(host, gameId, 'Host', 0)
+    await waitForEvent(host, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    await joinGame(other, gameId, 'Other', 3)
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    host.emit('start-game', { gameId, playerId: hostId })
+    let state = await waitForEvent(host, 'game-state')
+    await waitForEvent(other, 'game-state')
+
+    const liveGame = gameStore.get(gameId)!
+    const preflopActor = findPlayerBySeat(state, state.activePlayerIndex)
+    const preflopOther = state.players.find((player) => player !== null && player.id !== preflopActor.id)
+    if (!preflopOther) {
+      throw new Error('Expected two seated players')
+    }
+
+    const actorSeatPlayer = liveGame.players.find((player) => player.id === preflopActor.id)
+    const otherSeatPlayer = liveGame.players.find((player) => player.id === preflopOther.id)
+    if (!actorSeatPlayer || !otherSeatPlayer) {
+      throw new Error('Missing live players for preflop setup')
+    }
+
+    const actorChipsForAllInTo50 = 50 - actorSeatPlayer.bet
+    const otherChipsForCallAllIn = 50 - otherSeatPlayer.bet
+
+    gameStore.set(gameId, {
+      ...liveGame,
+      players: liveGame.players.map((p) => {
+        if (p.id === preflopActor.id) {
+          return { ...p, chips: actorChipsForAllInTo50 }
+        }
+        if (p.id === preflopOther.id) {
+          return { ...p, chips: otherChipsForCallAllIn }
+        }
+        return p
+      }),
+    })
+
+    const act = async (action: PlayerAction): Promise<ClientGameState> => {
+      const actingPlayer = findPlayerBySeat(state, state.activePlayerIndex)
+      const socket = actingPlayer.id === hostId ? host : other
+      const hostNext = waitForEvent(host, 'game-state')
+      const otherNext = waitForEvent(other, 'game-state')
+      socket.emit('player-action', { gameId, playerId: actingPlayer.id, action })
+      const [hostState] = await Promise.all([hostNext, otherNext])
+      state = hostState
+      return hostState
+    }
+
+    state = await act({ type: ActionType.Raise, amount: 50 })
+    const decisionStartedP = waitForEvent(host, 'runItTwiceDecisionStarted')
+    state = await act({ type: ActionType.Call })
+    await decisionStartedP
+    expect(state.runItTwiceDecisionPending).toBe(true)
+
+    const actorSocket = preflopActor.id === hostId ? host : other
+    const otherSocket = preflopOther.id === hostId ? host : other
+
+    actorSocket.emit('run-it-twice-decision', { gameId, playerId: preflopActor.id, agree: true })
+    await waitForEvent(host, 'runItTwiceDecisionUpdated')
+    otherSocket.emit('run-it-twice-decision', { gameId, playerId: preflopOther.id, agree: false })
+    await waitForEvent(host, 'runItTwiceDecisionUpdated')
+
+    const maybeRunItTwiceStarted = ensureSocketEventState(host).timeline.includes('runItTwiceStarted')
+    expect(maybeRunItTwiceStarted).toBe(false)
+
+    const showdownState = await waitForGameStateWhere(host, (next) => next.phase === GamePhase.Showdown, 10_000)
+    expect(showdownState.phase).toBe(GamePhase.Showdown)
+    expect(showdownState.runItTwiceEligible).toBe(false)
+    expect(showdownState.firstBoard).toBeNull()
+    expect(showdownState.secondBoard).toBeNull()
+  }, 20_000)
+
+  it('run it twice: disconnecting a pending voter auto-declines and avoids deadlock', async () => {
+    const gameId = seedGame({ betweenHandsDelay: 60, runItTwice: true })
+    gameIds.push(gameId)
+
+    const host = createClient(port)
+    const other = createClient(port)
+    clients.push(host, other)
+
+    const { playerId: hostId } = await joinGame(host, gameId, 'Host', 0)
+    await waitForEvent(host, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    const { playerId: otherId } = await joinGame(other, gameId, 'Other', 3)
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    host.emit('start-game', { gameId, playerId: hostId })
+    let state = await waitForEvent(host, 'game-state')
+    await waitForEvent(other, 'game-state')
+
+    const liveGame = gameStore.get(gameId)!
+    const preflopActor = findPlayerBySeat(state, state.activePlayerIndex)
+    const preflopOther = state.players.find((player) => player !== null && player.id !== preflopActor.id)
+    if (!preflopOther) {
+      throw new Error('Expected two seated players')
+    }
+
+    const actorSeatPlayer = liveGame.players.find((player) => player.id === preflopActor.id)
+    const otherSeatPlayer = liveGame.players.find((player) => player.id === preflopOther.id)
+    if (!actorSeatPlayer || !otherSeatPlayer) {
+      throw new Error('Missing live players for preflop setup')
+    }
+
+    const actorChipsForAllInTo50 = 50 - actorSeatPlayer.bet
+    const otherChipsForCallAllIn = 50 - otherSeatPlayer.bet
+
+    gameStore.set(gameId, {
+      ...liveGame,
+      players: liveGame.players.map((p) => {
+        if (p.id === preflopActor.id) {
+          return { ...p, chips: actorChipsForAllInTo50 }
+        }
+        if (p.id === preflopOther.id) {
+          return { ...p, chips: otherChipsForCallAllIn }
+        }
+        return p
+      }),
+    })
+
+    const act = async (action: PlayerAction): Promise<ClientGameState> => {
+      const actingPlayer = findPlayerBySeat(state, state.activePlayerIndex)
+      const socket = actingPlayer.id === hostId ? host : other
+      const hostNext = waitForEvent(host, 'game-state')
+      const otherNext = waitForEvent(other, 'game-state')
+      socket.emit('player-action', { gameId, playerId: actingPlayer.id, action })
+      const [hostState] = await Promise.all([hostNext, otherNext])
+      state = hostState
+      return hostState
+    }
+
+    state = await act({ type: ActionType.Raise, amount: 50 })
+    state = await act({ type: ActionType.Call })
+    expect(state.runItTwiceDecisionPending).toBe(true)
+
+    host.emit('run-it-twice-decision', { gameId, playerId: hostId, agree: true })
+    await waitForEvent(host, 'runItTwiceDecisionUpdated')
+
+    const disconnectDecision = waitForEvent(host, 'runItTwiceDecisionUpdated')
+    other.disconnect()
+
+    await expect(disconnectDecision).resolves.toMatchObject({
+      gameId,
+      playerId: otherId,
+      agree: false,
+    })
+
+    const showdownState = await waitForGameStateWhere(host, (next) => next.phase === GamePhase.Showdown, 10_000)
+    expect(showdownState.runItTwiceDecisionPending).toBe(false)
+    expect(showdownState.runItTwiceEligible).toBe(false)
+    expect(showdownState.firstBoard).toBeNull()
+    expect(showdownState.secondBoard).toBeNull()
+    expect(ensureSocketEventState(host).timeline.includes('runItTwiceStarted')).toBe(false)
+  }, 20_000)
+
+  it('run it twice: disconnecting a player after they vote keeps the existing vote intact', async () => {
+    const gameId = seedGame({ betweenHandsDelay: 60, runItTwice: true })
+    gameIds.push(gameId)
+
+    const host = createClient(port)
+    const other = createClient(port)
+    clients.push(host, other)
+
+    const { playerId: hostId } = await joinGame(host, gameId, 'Host', 0)
+    await waitForEvent(host, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    const { playerId: otherId } = await joinGame(other, gameId, 'Other', 3)
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    host.emit('start-game', { gameId, playerId: hostId })
+    let state = await waitForEvent(host, 'game-state')
+    await waitForEvent(other, 'game-state')
+
+    const liveGame = gameStore.get(gameId)!
+    const preflopActor = findPlayerBySeat(state, state.activePlayerIndex)
+    const preflopOther = state.players.find((player) => player !== null && player.id !== preflopActor.id)
+    if (!preflopOther) {
+      throw new Error('Expected two seated players')
+    }
+
+    const actorSeatPlayer = liveGame.players.find((player) => player.id === preflopActor.id)
+    const otherSeatPlayer = liveGame.players.find((player) => player.id === preflopOther.id)
+    if (!actorSeatPlayer || !otherSeatPlayer) {
+      throw new Error('Missing live players for preflop setup')
+    }
+
+    const actorChipsForAllInTo50 = 50 - actorSeatPlayer.bet
+    const otherChipsForCallAllIn = 50 - otherSeatPlayer.bet
+
+    gameStore.set(gameId, {
+      ...liveGame,
+      players: liveGame.players.map((p) => {
+        if (p.id === preflopActor.id) {
+          return { ...p, chips: actorChipsForAllInTo50 }
+        }
+        if (p.id === preflopOther.id) {
+          return { ...p, chips: otherChipsForCallAllIn }
+        }
+        return p
+      }),
+    })
+
+    const act = async (action: PlayerAction): Promise<ClientGameState> => {
+      const actingPlayer = findPlayerBySeat(state, state.activePlayerIndex)
+      const socket = actingPlayer.id === hostId ? host : other
+      const hostNext = waitForEvent(host, 'game-state')
+      const otherNext = waitForEvent(other, 'game-state')
+      socket.emit('player-action', { gameId, playerId: actingPlayer.id, action })
+      const [hostState] = await Promise.all([hostNext, otherNext])
+      state = hostState
+      return hostState
+    }
+
+    state = await act({ type: ActionType.Raise, amount: 50 })
+    state = await act({ type: ActionType.Call })
+    expect(state.runItTwiceDecisionPending).toBe(true)
+
+    other.emit('run-it-twice-decision', { gameId, playerId: otherId, agree: true })
+    await expect(waitForEvent(host, 'runItTwiceDecisionUpdated')).resolves.toMatchObject({
+      gameId,
+      playerId: otherId,
+      agree: true,
+    })
+
+    other.disconnect()
+
+    const pendingAfterDisconnect = await waitForGameStateWhere(
+      host,
+      (next) => {
+        const disconnectedPlayer = next.players.find((player) => player !== null && player.id === otherId)
+        return next.runItTwiceDecisionPending && disconnectedPlayer?.isConnected === false
+      },
+      5_000,
+    )
+    expect(pendingAfterDisconnect.runItTwiceDecisionPending).toBe(true)
+    await expect(waitForEvent(host, 'runItTwiceDecisionUpdated', 200)).rejects.toThrow(
+      'Timed out waiting for runItTwiceDecisionUpdated',
+    )
+
+    host.emit('run-it-twice-decision', { gameId, playerId: hostId, agree: true })
+    await expect(waitForEvent(host, 'runItTwiceDecisionUpdated')).resolves.toMatchObject({
+      gameId,
+      playerId: hostId,
+      agree: true,
+    })
+    await expect(waitForEvent(host, 'runItTwiceStarted')).resolves.toMatchObject({ gameId })
+
+    const showdownState = await waitForGameStateWhere(host, (next) => next.phase === GamePhase.Showdown, 10_000)
+    expect(showdownState.runItTwiceEligible).toBe(true)
+    expect(showdownState.firstBoard).not.toBeNull()
+    expect(showdownState.secondBoard).not.toBeNull()
+  }, 20_000)
+
+  it('run it twice: host can toggle config in-game and decision prompt path activates on all-in lock', async () => {
+    const gameId = seedGame({ betweenHandsDelay: 60, runItTwice: false })
+    gameIds.push(gameId)
+
+    const host = createClient(port)
+    const other = createClient(port)
+    clients.push(host, other)
+
+    const { playerId: hostId } = await joinGame(host, gameId, 'Host', 0)
+    await waitForEvent(host, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    await joinGame(other, gameId, 'Other', 3)
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    host.emit('update-config', { gameId, playerId: hostId, config: { runItTwice: true } })
+    const hostConfigured = await waitForEvent(host, 'game-state')
+    await waitForEvent(other, 'game-state')
+    expect(hostConfigured.config.runItTwice).toBe(true)
+
+    host.emit('start-game', { gameId, playerId: hostId })
+    let state = await waitForEvent(host, 'game-state')
+    await waitForEvent(other, 'game-state')
+
+    const liveGame = gameStore.get(gameId)!
+    const preflopActor = findPlayerBySeat(state, state.activePlayerIndex)
+    const preflopOther = state.players.find((player) => player !== null && player.id !== preflopActor.id)
+    if (!preflopOther) {
+      throw new Error('Expected two seated players')
+    }
+
+    const actorSeatPlayer = liveGame.players.find((player) => player.id === preflopActor.id)
+    const otherSeatPlayer = liveGame.players.find((player) => player.id === preflopOther.id)
+    if (!actorSeatPlayer || !otherSeatPlayer) {
+      throw new Error('Missing live players for preflop setup')
+    }
+
+    const actorChipsForAllInTo50 = 50 - actorSeatPlayer.bet
+    const otherChipsForCallAllIn = 50 - otherSeatPlayer.bet
+
+    gameStore.set(gameId, {
+      ...liveGame,
+      players: liveGame.players.map((p) => {
+        if (p.id === preflopActor.id) {
+          return { ...p, chips: actorChipsForAllInTo50 }
+        }
+        if (p.id === preflopOther.id) {
+          return { ...p, chips: otherChipsForCallAllIn }
+        }
+        return p
+      }),
+    })
+
+    const act = async (action: PlayerAction): Promise<ClientGameState> => {
+      const actingPlayer = findPlayerBySeat(state, state.activePlayerIndex)
+      const socket = actingPlayer.id === hostId ? host : other
+      const hostNext = waitForEvent(host, 'game-state')
+      const otherNext = waitForEvent(other, 'game-state')
+      socket.emit('player-action', { gameId, playerId: actingPlayer.id, action })
+      const [hostState] = await Promise.all([hostNext, otherNext])
+      state = hostState
+      return hostState
+    }
+
+    state = await act({ type: ActionType.Raise, amount: 50 })
+    const decisionStartedP = waitForEvent(host, 'runItTwiceDecisionStarted')
+    state = await act({ type: ActionType.Call })
+    await decisionStartedP
+
+    expect(state.config.runItTwice).toBe(true)
+    expect(state.runItTwiceDecisionPending).toBe(true)
+    expect(Object.keys(state.runItTwiceVotes).length).toBe(2)
+  }, 20_000)
+
+  it('run it twice: reset clears pending runout and keeps game waiting', async () => {
+    const gameId = seedGame({ betweenHandsDelay: 60, runItTwice: true })
+    gameIds.push(gameId)
+
+    const host = createClient(port)
+    const other = createClient(port)
+    clients.push(host, other)
+
+    const { playerId: hostId } = await joinGame(host, gameId, 'Host', 0)
+    await waitForEvent(host, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    await joinGame(other, gameId, 'Other', 3)
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(other, 'game-state')
+    await waitForEvent(host, 'game-state')
+
+    host.emit('start-game', { gameId, playerId: hostId })
+    let state = await waitForEvent(host, 'game-state')
+    await waitForEvent(other, 'game-state')
+
+    const liveGame = gameStore.get(gameId)!
+    const preflopActor = findPlayerBySeat(state, state.activePlayerIndex)
+    const preflopOther = state.players.find((player) => player !== null && player.id !== preflopActor.id)
+    if (!preflopOther) {
+      throw new Error('Expected two seated players')
+    }
+
+    const actorSeatPlayer = liveGame.players.find((player) => player.id === preflopActor.id)
+    const otherSeatPlayer = liveGame.players.find((player) => player.id === preflopOther.id)
+    if (!actorSeatPlayer || !otherSeatPlayer) {
+      throw new Error('Missing live players for preflop setup')
+    }
+
+    const actorChipsForAllInTo50 = 50 - actorSeatPlayer.bet
+    const otherChipsForCallAllIn = 50 - otherSeatPlayer.bet
+
+    gameStore.set(gameId, {
+      ...liveGame,
+      players: liveGame.players.map((p) => {
+        if (p.id === preflopActor.id) {
+          return { ...p, chips: actorChipsForAllInTo50 }
+        }
+        if (p.id === preflopOther.id) {
+          return { ...p, chips: otherChipsForCallAllIn }
+        }
+        return p
+      }),
+    })
+
+    const act = async (action: PlayerAction): Promise<ClientGameState> => {
+      const actingPlayer = findPlayerBySeat(state, state.activePlayerIndex)
+      const socket = actingPlayer.id === hostId ? host : other
+      const hostNext = waitForEvent(host, 'game-state')
+      const otherNext = waitForEvent(other, 'game-state')
+      socket.emit('player-action', { gameId, playerId: actingPlayer.id, action })
+      const [hostState] = await Promise.all([hostNext, otherNext])
+      state = hostState
+      return hostState
+    }
+
+    state = await act({ type: ActionType.Raise, amount: 50 })
+    state = await act({ type: ActionType.Call })
+    expect(state.runItTwiceDecisionPending).toBe(true)
+    expect(state.activePlayerIndex).toBe(-1)
+
+    host.emit('reset-game', { gameId, playerId: hostId })
+    const resetState = await waitForEvent(host, 'game-state')
+    await waitForEvent(other, 'game-state')
+    expect(resetState.phase).toBe(GamePhase.Waiting)
+    expect(resetState.runItTwiceEligible).toBe(false)
+
+    await new Promise((resolve) => setTimeout(resolve, 300))
+
+    const timeline = ensureSocketEventState(host).timeline
+    expect(timeline.includes('boardResult')).toBe(false)
+    expect(timeline.includes('hand-result')).toBe(false)
+  }, 20_000)
+
 })

@@ -30,6 +30,7 @@ interface FormErrors {
   betweenHandsDelay?: string;
   maxPlayers?: string;
   blindIncreaseInterval?: string;
+  runItTwice?: string;
   general?: string;
 }
 
@@ -86,6 +87,7 @@ export default function CreateGamePage() {
     timePerAction: 30,
     betweenHandsDelay: 3,
     maxPlayers: 9,
+    runItTwice: false,
     enableBlindSchedule: false,
     blindSchedulePreset: "normal" as "turbo" | "normal" | "slow",
     blindIncreaseInterval: 10,
@@ -211,7 +213,7 @@ export default function CreateGamePage() {
     setErrors({});
 
     try {
-      type GamePayload = {
+type GamePayload = {
         hostDisplayName: string;
         hostSeatIndex: number;
         smallBlind: number;
@@ -220,6 +222,7 @@ export default function CreateGamePage() {
         timePerAction: number;
         betweenHandsDelay: number;
         maxPlayers: number;
+        runItTwice: boolean;
         blindSchedule?: { smallBlind: number; bigBlind: number }[];
         blindIncreaseInterval?: number;
       };
@@ -430,6 +433,27 @@ export default function CreateGamePage() {
                 </div>
 
                 <div className="md:col-span-2 pt-2 border-t border-zinc-800/50">
+                  <div className="mb-4 rounded-xl border border-zinc-800/70 bg-zinc-950/40 p-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-medium text-zinc-300">Run It Twice</p>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          Automatically runs two boards when all remaining players are all-in.
+                        </p>
+                      </div>
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          name="runItTwice"
+                          checked={formData.runItTwice}
+                          onChange={handleCheckboxChange}
+                          className="w-4 h-4 accent-amber-500 cursor-pointer"
+                        />
+                        <span className="text-sm text-zinc-400">Enable</span>
+                      </label>
+                    </div>
+                  </div>
+
                   <div className="flex items-center justify-between mb-4">
                     <label className="block text-sm font-medium text-zinc-400">Enable Blind Increases</label>
                     <label className="flex items-center gap-3 cursor-pointer">

@@ -1,6 +1,7 @@
 import { ClientGameState, PlayerAction } from '@/engine/types';
 import { PotDisplay } from './PotDisplay';
 import { CommunityCards } from './CommunityCards';
+import { DualBoard } from './DualBoard';
 import { PlayerSeat } from './PlayerSeat';
 import { ActionBar } from '@/components/ActionBar';
 import type { HandResultEvent } from '@/lib/useGameSocket';
@@ -14,9 +15,10 @@ interface PokerTableProps {
     pending: boolean;
   } | null;
   lastHandResult?: HandResultEvent | null;
+  runItTwicePotAwards?: HandResultEvent['results'][number]['potAwards'];
 }
 
-export function PokerTable({ gameState, playerId, onAction, actionConfirmation, lastHandResult }: PokerTableProps) {
+export function PokerTable({ gameState, playerId, onAction, actionConfirmation, lastHandResult, runItTwicePotAwards = [] }: PokerTableProps) {
   const currentPlayerSeatIndex = gameState.players.findIndex(p => p?.id === playerId);
   const isPlaying = currentPlayerSeatIndex >= 0;
   
@@ -64,6 +66,10 @@ export function PokerTable({ gameState, playerId, onAction, actionConfirmation, 
   // Animate pot when someone wins
   const hasWonPot = lastHandResult && lastHandResult.results.some(r => r.winnings > 0);
 
+  const hasRunItTwice = gameState.runItTwiceEligible;
+  const runOneAwards = runItTwicePotAwards.filter((award) => award.runIndex === 0);
+  const runTwoAwards = runItTwicePotAwards.filter((award) => award.runIndex === 1);
+
   return (
     <div className="w-full h-full flex items-center justify-center bg-gray-950 font-sans overflow-hidden p-4 pb-24">
       <div className="relative w-full max-w-7xl aspect-[1.8/1] bg-green-800 rounded-[200px] border-[16px] border-slate-800 shadow-[inset_0_0_80px_rgba(0,0,0,0.8),0_20px_40px_rgba(0,0,0,0.5)] flex items-center justify-center overflow-hidden">
@@ -73,7 +79,43 @@ export function PokerTable({ gameState, playerId, onAction, actionConfirmation, 
           <div key={`pot-${lastHandResult?.handNumber}`} className={hasWonPot ? "animate-pot-win" : ""}>
             <PotDisplay pot={gameState.pot} sidePots={gameState.sidePots} />
           </div>
-          <CommunityCards cards={gameState.communityCards} phase={gameState.phase} handNumber={gameState.handNumber} />
+          {hasRunItTwice ? (
+            <>
+              <DualBoard
+                communityCards={gameState.communityCards}
+                phase={gameState.phase}
+                handNumber={gameState.handNumber}
+                currentRunIndex={gameState.currentRunIndex}
+                runoutPhase={gameState.runoutPhase}
+                firstBoard={gameState.firstBoard}
+                secondBoard={gameState.secondBoard}
+              />
+              {(runOneAwards.length > 0 || runTwoAwards.length > 0) && (
+                <div className="w-full max-w-4xl rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-xs text-gray-300">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="uppercase tracking-[0.2em] text-amber-300">Run 1 Awards</p>
+                      <p className="mt-1">
+                        {runOneAwards.length === 0
+                          ? 'Pending'
+                          : runOneAwards.map((award) => `Pot ${award.potIndex + 1}: ${award.amount}`).join(' · ')}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="uppercase tracking-[0.2em] text-sky-300">Run 2 Awards</p>
+                      <p className="mt-1">
+                        {runTwoAwards.length === 0
+                          ? 'Pending'
+                          : runTwoAwards.map((award) => `Pot ${award.potIndex + 1}: ${award.amount}`).join(' · ')}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <CommunityCards cards={gameState.communityCards} phase={gameState.phase} handNumber={gameState.handNumber} />
+          )}
         </div>
 
         {Array.from({ length: maxSeats }).map((_, i) => {

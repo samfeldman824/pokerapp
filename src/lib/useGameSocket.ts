@@ -20,7 +20,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { ClientGameState, HandResult } from '@/engine/types'
+import type { ClientGameState, CompletedHandBoard, GamePhase, HandResult, PotAward } from '@/engine/types'
 import { getToken, setToken, getPlayerId, setPlayerId as storePlayerId } from '@/lib/playerStorage'
 
 type SocketClient = import('socket.io-client').Socket
@@ -28,8 +28,30 @@ type SocketClient = import('socket.io-client').Socket
 export type HandResultEvent = {
   gameId: string
   handNumber: number
-  communityCards: ClientGameState['communityCards']
+  boards: CompletedHandBoard[]
   results: HandResult[]
+}
+
+export type RunItTwiceStartedEvent = {
+  gameId: string
+}
+
+export type BoardResultEvent = {
+  gameId: string
+  runIndex: 0 | 1
+  board: ClientGameState['communityCards']
+  potAwards: PotAward[]
+}
+
+export type RunItTwiceDecisionStartedEvent = {
+  gameId: string
+  playerIds: string[]
+}
+
+export type RunItTwiceDecisionUpdatedEvent = {
+  gameId: string
+  playerId: string
+  agree: boolean
 }
 
 export type ChatMessage = {
@@ -59,6 +81,17 @@ type UseGameSocketOptions = {
  */
 export function useGameSocket(gameId: string, options: UseGameSocketOptions = {}): {
   gameState: ClientGameState | null
+  runItTwiceEligible: boolean
+  runItTwiceDecisionPending: boolean
+  runItTwiceVotes: Record<string, boolean | null>
+  currentRunIndex: 0 | 1 | null
+  runoutPhase: GamePhase | null
+  runoutStartPhase: GamePhase | null
+  firstBoard: ClientGameState['communityCards'] | null
+  secondBoard: ClientGameState['communityCards'] | null
+  hasRunItTwiceStarted: boolean
+  boardResults: { 0: BoardResultEvent | null; 1: BoardResultEvent | null }
+  runItTwicePotAwards: PotAward[]
   playerId: string | null
   spectatorId: string | null
   isConnected: boolean
@@ -74,7 +107,14 @@ export function useGameSocket(gameId: string, options: UseGameSocketOptions = {}
   const [isConnected, setIsConnected] = useState<boolean>(false)
   const [lastError, setLastError] = useState<string | null>(null)
   const [lastHandResult, setLastHandResult] = useState<HandResultEvent | null>(null)
+  const [hasRunItTwiceStarted, setHasRunItTwiceStarted] = useState(false)
+  const [boardResults, setBoardResults] = useState<{ 0: BoardResultEvent | null; 1: BoardResultEvent | null }>({
+    0: null,
+    1: null,
+  })
+  const [runItTwiceVotes, setRunItTwiceVotes] = useState<Record<string, boolean | null>>({})
   const onChatMessageRef = useRef<UseGameSocketOptions['onChatMessage']>(options.onChatMessage)
+  const currentHandNumberRef = useRef<number | null>(null)
 
   useEffect(() => {
     onChatMessageRef.current = options.onChatMessage
@@ -145,6 +185,15 @@ export function useGameSocket(gameId: string, options: UseGameSocketOptions = {}
       const onGameState = (state: ClientGameState) => {
         if (state.id !== gameId) return
         setLastError(null)
+
+        if (currentHandNumberRef.current !== state.handNumber) {
+          currentHandNumberRef.current = state.handNumber
+          setHasRunItTwiceStarted(false)
+          setBoardResults({ 0: null, 1: null })
+        }
+
+        setRunItTwiceVotes(state.runItTwiceVotes ?? {})
+
         setGameState(state)
         setPlayerId((prev) => {
           if (prev) return prev
@@ -162,6 +211,31 @@ export function useGameSocket(gameId: string, options: UseGameSocketOptions = {}
         setLastHandResult(event)
       }
 
+      const onRunItTwiceStarted = (event: RunItTwiceStartedEvent) => {
+        if (event.gameId !== gameId) return
+        setHasRunItTwiceStarted((prev) => prev || true)
+      }
+
+      const onBoardResult = (event: BoardResultEvent) => {
+        if (event.gameId !== gameId) return
+        setBoardResults((prev) => ({
+          ...prev,
+          [event.runIndex]: event,
+        }))
+      }
+
+      const onRunItTwiceDecisionStarted = (event: RunItTwiceDecisionStartedEvent) => {
+        if (event.gameId !== gameId) return
+        console.info('[RIT][client] decision-started', event)
+        setRunItTwiceVotes(Object.fromEntries(event.playerIds.map((id) => [id, null])))
+      }
+
+      const onRunItTwiceDecisionUpdated = (event: RunItTwiceDecisionUpdatedEvent) => {
+        if (event.gameId !== gameId) return
+        console.info('[RIT][client] decision-updated', event)
+        setRunItTwiceVotes((prev) => ({ ...prev, [event.playerId]: event.agree }))
+      }
+
       const onChatBroadcast = (event: ChatMessage) => {
         if (event.gameId !== gameId) return
         onChatMessageRef.current?.(event)
@@ -174,6 +248,10 @@ export function useGameSocket(gameId: string, options: UseGameSocketOptions = {}
       socket.on('chat-broadcast', onChatBroadcast)
       socket.on('error', onError)
       socket.on('hand-result', onHandResult)
+      socket.on('runItTwiceStarted', onRunItTwiceStarted)
+      socket.on('boardResult', onBoardResult)
+      socket.on('runItTwiceDecisionStarted', onRunItTwiceDecisionStarted)
+      socket.on('runItTwiceDecisionUpdated', onRunItTwiceDecisionUpdated)
       socket.connect()
 
       detachListeners = () => {
@@ -184,6 +262,10 @@ export function useGameSocket(gameId: string, options: UseGameSocketOptions = {}
         socket.off('chat-broadcast', onChatBroadcast)
         socket.off('error', onError)
         socket.off('hand-result', onHandResult)
+        socket.off('runItTwiceStarted', onRunItTwiceStarted)
+        socket.off('boardResult', onBoardResult)
+        socket.off('runItTwiceDecisionStarted', onRunItTwiceDecisionStarted)
+        socket.off('runItTwiceDecisionUpdated', onRunItTwiceDecisionUpdated)
         socket.disconnect()
       }
     })()
@@ -200,8 +282,28 @@ export function useGameSocket(gameId: string, options: UseGameSocketOptions = {}
     }
   }, [gameId])
 
+  const eventDerivedRunItTwicePotAwards = [boardResults[0], boardResults[1]].flatMap((result) => result?.potAwards ?? [])
+  const handResultDerivedRunItTwicePotAwards = (lastHandResult?.results ?? [])
+    .flatMap((result) => result.potAwards)
+    .filter((award): award is PotAward => award.runIndex === 0 || award.runIndex === 1)
+
+  const runItTwicePotAwards = eventDerivedRunItTwicePotAwards.length > 0
+    ? eventDerivedRunItTwicePotAwards
+    : handResultDerivedRunItTwicePotAwards
+
   return {
     gameState,
+    runItTwiceEligible: gameState?.runItTwiceEligible ?? false,
+    runItTwiceDecisionPending: gameState?.runItTwiceDecisionPending ?? false,
+    runItTwiceVotes: Object.keys(runItTwiceVotes).length > 0 ? runItTwiceVotes : (gameState?.runItTwiceVotes ?? {}),
+    currentRunIndex: gameState?.currentRunIndex ?? null,
+    runoutPhase: gameState?.runoutPhase ?? null,
+    runoutStartPhase: gameState?.runoutStartPhase ?? null,
+    firstBoard: gameState?.firstBoard ?? null,
+    secondBoard: gameState?.secondBoard ?? null,
+    hasRunItTwiceStarted,
+    boardResults,
+    runItTwicePotAwards,
     playerId,
     spectatorId,
     isConnected,

@@ -28,6 +28,7 @@ const TABLES = [
     hand_number INTEGER NOT NULL,
     dealer_seat_index INTEGER NOT NULL,
     community_cards JSONB NOT NULL DEFAULT '[]',
+    boards JSONB NOT NULL DEFAULT '[]',
     pot_total INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     completed_at TIMESTAMP
@@ -47,6 +48,7 @@ const TABLES = [
     hand_id TEXT NOT NULL REFERENCES hands(id),
     player_id TEXT NOT NULL REFERENCES players(id),
     hole_cards JSONB,
+    board_results JSONB NOT NULL DEFAULT '[]',
     hand_rank INTEGER,
     hand_description TEXT,
     winnings INTEGER NOT NULL DEFAULT 0
@@ -58,9 +60,9 @@ const REQUIRED_TABLES = ['games', 'players', 'hands', 'hand_actions', 'hand_resu
 const REQUIRED_TABLE_COLUMNS: Record<(typeof REQUIRED_TABLES)[number], readonly string[]> = {
   games: ['id', 'config', 'status', 'created_at'],
   players: ['id', 'game_id', 'display_name', 'seat_index', 'token'],
-  hands: ['id', 'game_id', 'hand_number', 'dealer_seat_index', 'community_cards', 'pot_total'],
+  hands: ['id', 'game_id', 'hand_number', 'dealer_seat_index', 'community_cards', 'boards', 'pot_total'],
   hand_actions: ['id', 'hand_id', 'player_id', 'phase', 'action_type', 'ordering'],
-  hand_results: ['id', 'hand_id', 'player_id', 'winnings'],
+  hand_results: ['id', 'hand_id', 'player_id', 'board_results', 'winnings'],
 }
 
 type DbInfoRow = {
@@ -113,6 +115,9 @@ async function createTables(client: PoolClient) {
   for (const sql of TABLES) {
     await client.query(sql)
   }
+
+  await client.query(`ALTER TABLE hands ADD COLUMN IF NOT EXISTS boards JSONB NOT NULL DEFAULT '[]'`)
+  await client.query(`ALTER TABLE hand_results ADD COLUMN IF NOT EXISTS board_results JSONB NOT NULL DEFAULT '[]'`)
 }
 
 async function main() {

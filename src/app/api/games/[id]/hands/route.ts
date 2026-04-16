@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 
 import { db } from '@/db'
 import { games, handResults, hands, players } from '@/db/schema'
+import { buildHandHistorySummaries } from '@/lib/handHistory'
 
 export async function GET(
   _request: Request,
@@ -24,6 +25,7 @@ export async function GET(
       handNumber: hands.handNumber,
       potTotal: hands.potTotal,
       communityCards: hands.communityCards,
+      boards: hands.boards,
       completedAt: hands.completedAt,
     })
     .from(hands)
@@ -38,6 +40,9 @@ export async function GET(
     .select({
       handId: handResults.handId,
       displayName: players.displayName,
+      boardResults: handResults.boardResults,
+      handRank: handResults.handRank,
+      handDescription: handResults.handDescription,
       winnings: handResults.winnings,
     })
     .from(handResults)
@@ -45,28 +50,7 @@ export async function GET(
     .innerJoin(hands, eq(handResults.handId, hands.id))
     .where(eq(hands.gameId, params.id))
 
-  const resultsByHandId = new Map<
-    string,
-    Array<{ displayName: string; winnings: number }>
-  >()
-  for (const row of allResultsRows) {
-    const existing = resultsByHandId.get(row.handId) ?? []
-    existing.push({ displayName: row.displayName, winnings: row.winnings })
-    resultsByHandId.set(row.handId, existing)
-  }
-
-  const response = handsRows.map((hand) => {
-    const allResults = resultsByHandId.get(hand.id) ?? []
-    const winners = allResults.filter((r) => r.winnings > 0)
-
-    return {
-      handNumber: hand.handNumber,
-      potTotal: hand.potTotal,
-      communityCards: hand.communityCards,
-      winners,
-      completedAt: hand.completedAt,
-    }
-  })
+  const response = buildHandHistorySummaries(handsRows, allResultsRows)
 
   return NextResponse.json(response)
 }

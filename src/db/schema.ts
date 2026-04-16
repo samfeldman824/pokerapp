@@ -61,6 +61,8 @@ export const hands = pgTable('hands', {
   dealerSeatIndex: integer('dealer_seat_index').notNull(),
   /** Community cards revealed during the hand (0–5 cards as JSON). */
   communityCards: jsonb('community_cards').notNull().default([]),
+  /** Final board list for completed hands (one entry for normal hands, two for dual-board hands). */
+  boards: jsonb('boards').notNull().default([]),
   /** Total chips in all pots at the end of the hand. */
   potTotal: integer('pot_total').notNull().default(0),
   createdAt: timestamp('created_at').notNull().defaultNow(),
@@ -92,6 +94,8 @@ export const handResults = pgTable('hand_results', {
   playerId: text('player_id').notNull().references(() => players.id),
   /** Two-card JSON array; null if the player folded before showdown. */
   holeCards: jsonb('hole_cards'),
+  /** Board-specific evaluation and winnings breakdown. */
+  boardResults: jsonb('board_results').notNull().default([]),
   /** Numeric `HandRank` enum value; null if the player folded. */
   handRank: integer('hand_rank'),
   /** Human-readable description (e.g., "Ace-high Flush"); null if folded. */

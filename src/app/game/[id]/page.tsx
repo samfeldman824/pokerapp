@@ -122,7 +122,43 @@ export default function GamePage() {
     }
   }, []);
 
-  const { gameState, playerId, spectatorId, isConnected, lastError, lastHandResult, emit } = useGameSocket(gameId, { onChatMessage });
+  const {
+    gameState,
+    playerId,
+    spectatorId,
+    isConnected,
+    lastError,
+    lastHandResult,
+    runItTwicePotAwards,
+    runItTwiceDecisionPending,
+    runItTwiceVotes,
+    emit,
+  } = useGameSocket(gameId, { onChatMessage });
+
+  const pendingRunItTwiceVotes = Object.entries(runItTwiceVotes).filter(([, vote]) => vote === null).length;
+
+  const submitRunItTwiceDecision = useCallback((agree: boolean) => {
+    if (!playerId) return;
+    emit('run-it-twice-decision', { gameId, playerId, agree });
+  }, [emit, gameId, playerId]);
+
+  const isSpectator = !!spectatorId;
+  const currentPlayerVote = playerId ? runItTwiceVotes[playerId] : null;
+
+  useEffect(() => {
+    if (!gameState) return;
+    console.info('[RIT][page] state', {
+      gameId,
+      configRunItTwice: gameState.config.runItTwice,
+      phase: gameState.phase,
+      activePlayerIndex: gameState.activePlayerIndex,
+      decisionPending: runItTwiceDecisionPending,
+      votes: runItTwiceVotes,
+      playerId,
+      isSpectator,
+      shouldShowModal: runItTwiceDecisionPending && !isSpectator && gameState.phase !== GamePhase.Showdown,
+    });
+  }, [gameId, gameState, isSpectator, playerId, runItTwiceDecisionPending, runItTwiceVotes]);
 
   const handleSendChatMessage = useCallback((text: string, type: 'custom' | 'reaction') => {
     if (!playerId && !spectatorId) return;
@@ -143,8 +179,6 @@ export default function GamePage() {
   const handleToggleChat = useCallback(() => {
     setIsChatOpen(prev => !prev);
   }, []);
-
-  const isSpectator = !!spectatorId;
 
   const [muckedHandNumber, setMuckedHandNumber] = useState<number | null>(null);
   const [actionConfirmation, setActionConfirmation] = useState<ActionConfirmation | null>(null);
@@ -707,6 +741,20 @@ export default function GamePage() {
             </button>
             {isHost && (
               <button
+                onClick={() => emit('update-config', { gameId, playerId, config: { runItTwice: !gameState?.config.runItTwice } })}
+                className={
+                  "px-4 py-1.5 text-sm font-medium rounded border transition-colors " +
+                  (gameState?.config.runItTwice
+                    ? "bg-emerald-700 hover:bg-emerald-600 text-white border-emerald-500"
+                    : "bg-gray-800 hover:bg-gray-700 text-white border-gray-700")
+                }
+              >
+                Run It Twice: {gameState?.config.runItTwice ? "On" : "Off"}
+              </button>
+            )}
+
+            {isHost && (
+              <button
                 onClick={handleTogglePrivateSession}
                 title={privateSession ? "Each tab is a separate player (Private Session ON)" : "Same player across tabs (Private Session OFF)"}
                 className={
@@ -767,6 +815,35 @@ export default function GamePage() {
         </div>
       )}
 
+      {runItTwiceDecisionPending && gameState && !isSpectator && gameState.phase !== GamePhase.Showdown && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl">
+            <h2 className="text-xl font-bold text-white">Run It Twice?</h2>
+            <p className="mt-2 text-sm text-zinc-300">
+              All-in detected. Both players must agree to run it twice.
+              {pendingRunItTwiceVotes > 0 ? ` Waiting on ${pendingRunItTwiceVotes} vote${pendingRunItTwiceVotes === 1 ? '' : 's'}.` : ''}
+            </p>
+
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={() => submitRunItTwiceDecision(true)}
+                disabled={currentPlayerVote !== null}
+                className="flex-1 rounded-lg bg-emerald-600 px-4 py-2 font-semibold text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-zinc-700"
+              >
+                Agree
+              </button>
+              <button
+                onClick={() => submitRunItTwiceDecision(false)}
+                disabled={currentPlayerVote !== null}
+                className="flex-1 rounded-lg bg-rose-600 px-4 py-2 font-semibold text-white transition-colors hover:bg-rose-500 disabled:cursor-not-allowed disabled:bg-zinc-700"
+              >
+                Decline
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isHost && (
         <div className="bg-gray-900/80 backdrop-blur border-b border-gray-800 px-6 py-3 flex items-center justify-between z-10">
           <div className="flex items-center gap-2">
@@ -807,7 +884,14 @@ export default function GamePage() {
         
         {gameState && (playerId || spectatorId) ? (
           <div className="w-full h-full p-4 relative z-10">
-            <PokerTable gameState={gameState} playerId={playerId ?? ""} onAction={handleAction} actionConfirmation={actionConfirmation} lastHandResult={lastHandResult} />
+            <PokerTable
+              gameState={gameState}
+              playerId={playerId ?? ""}
+              onAction={handleAction}
+              actionConfirmation={actionConfirmation}
+              lastHandResult={lastHandResult}
+              runItTwicePotAwards={runItTwicePotAwards}
+            />
             {playerId && (() => {
               const activePlayers = gameState.players.filter(p => p && !p.isFolded);
               const isUncontestedWin = gameState.phase === GamePhase.Showdown && activePlayers.length === 1;

@@ -117,6 +117,7 @@ export interface GameConfig {
   startingStack: number
   timePerAction: number            // seconds per action; 0 = no limit
   betweenHandsDelay: number
+  runItTwice: boolean
   maxPlayers: number               // 2–9
 }
 
@@ -127,6 +128,14 @@ export interface GameState {
   players: PlayerState[]           // compact sorted array (canonical form); sparse when passed into betting.ts
   spectators: Array<{ id: string; displayName: string }>
   communityCards: Card[]           // 0–5 cards revealed so far
+  runItTwiceEligible: boolean
+  runItTwiceDecisionPending: boolean
+  runItTwiceVotes: Record<string, boolean | null>
+  currentRunIndex: 0 | 1 | null
+  runoutPhase: GamePhase | null
+  runoutStartPhase: GamePhase | null
+  firstBoard: Card[] | null
+  secondBoard: Card[] | null
   pot: number                      // chips collected from previous streets (current street bets live on PlayerState.bet)
   sidePots: SidePot[]
   dealerIndex: number              // seat index of the current dealer (-1 before the first hand)
@@ -194,9 +203,30 @@ export interface ComparisonResult {
 
 export interface PotAward {
   potIndex: number                 // 0 = main pot, 1+ = side pots
+  runIndex: 0 | 1
   amount: number
   winnerIds: string[]
   handDescription: string          // e.g., "Ace-high Flush"
+}
+
+export interface CompletedHandBoard {
+  runIndex: 0 | 1
+  communityCards: Card[]
+}
+
+export interface HandResultBoard {
+  runIndex: 0 | 1
+  evaluation: HandEvaluation | null
+  winnings: number
+  potAwards: PotAward[]
+}
+
+export interface PersistedHandResultBoard {
+  runIndex: 0 | 1
+  handRank: HandRank | null
+  handDescription: string | null
+  winnings: number
+  potAwards: PotAward[]
 }
 
 export interface HandResult {
@@ -206,4 +236,5 @@ export interface HandResult {
   winnings: number
   chipDelta: number                  // net chip change this hand (negative = lost chips)
   potAwards: PotAward[]
+  boardResults: HandResultBoard[]
 }
