@@ -13,3 +13,4 @@ test-results/.last-run.json
 .vscode/settings.json
 docs/
 .DS_Store
+test-results/.last-run.json
