@@ -87,6 +87,7 @@ export function PokerTable({ gameState, playerId, onAction, actionConfirmation, 
                 handNumber={gameState.handNumber}
                 currentRunIndex={gameState.currentRunIndex}
                 runoutPhase={gameState.runoutPhase}
+                runoutStartPhase={gameState.runoutStartPhase}
                 firstBoard={gameState.firstBoard}
                 secondBoard={gameState.secondBoard}
               />

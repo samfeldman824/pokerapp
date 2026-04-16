@@ -7,34 +7,61 @@ interface DualBoardProps {
   handNumber: number;
   currentRunIndex: 0 | 1 | null;
   runoutPhase: GamePhase | null;
+  runoutStartPhase: GamePhase | null;
   firstBoard: CardType[] | null;
   secondBoard: CardType[] | null;
 }
 
-function getBoardPhases(
+function getSharedPrefixCards(cards: CardType[], runoutStartPhase: GamePhase | null): CardType[] {
+  if (runoutStartPhase === GamePhase.Flop) {
+    return cards.slice(0, 3);
+  }
+
+  if (runoutStartPhase === GamePhase.Turn) {
+    return cards.slice(0, 4);
+  }
+
+  return [];
+}
+
+export function getDualBoardDisplayState(
+  communityCards: CardType[],
   phase: GamePhase,
   runoutPhase: GamePhase | null,
+  runoutStartPhase: GamePhase | null,
   currentRunIndex: 0 | 1 | null,
   firstBoard: CardType[] | null,
   secondBoard: CardType[] | null,
-): { boardOnePhase: GamePhase; boardTwoPhase: GamePhase } {
+): {
+  boardOneCards: CardType[];
+  boardTwoCards: CardType[];
+  boardOnePhase: GamePhase;
+  boardTwoPhase: GamePhase;
+} {
   const liveRunPhase = runoutPhase ?? phase;
+  const sharedPrefixCards = getSharedPrefixCards(communityCards, runoutStartPhase);
 
   if (currentRunIndex === 0) {
     return {
+      boardOneCards: communityCards,
+      boardTwoCards: secondBoard ?? sharedPrefixCards,
       boardOnePhase: liveRunPhase,
-      boardTwoPhase: GamePhase.Preflop,
+      boardTwoPhase: runoutStartPhase ?? liveRunPhase,
     };
   }
 
   if (currentRunIndex === 1) {
     return {
+      boardOneCards: firstBoard ?? communityCards,
+      boardTwoCards: secondBoard ?? communityCards,
       boardOnePhase: firstBoard && firstBoard.length === 5 ? GamePhase.Showdown : GamePhase.River,
       boardTwoPhase: liveRunPhase,
     };
   }
 
   return {
+    boardOneCards: firstBoard ?? communityCards,
+    boardTwoCards: secondBoard ?? [],
     boardOnePhase: firstBoard && firstBoard.length === 5 ? GamePhase.Showdown : phase,
     boardTwoPhase: secondBoard && secondBoard.length === 5 ? GamePhase.Showdown : GamePhase.Preflop,
   };
@@ -46,20 +73,15 @@ export function DualBoard({
   handNumber,
   currentRunIndex,
   runoutPhase,
+  runoutStartPhase,
   firstBoard,
   secondBoard,
 }: DualBoardProps) {
-  const boardOneCards = currentRunIndex === 0
-    ? communityCards
-    : (firstBoard ?? communityCards);
-
-  const boardTwoCards = currentRunIndex === 1
-    ? communityCards
-    : (secondBoard ?? []);
-
-  const { boardOnePhase, boardTwoPhase } = getBoardPhases(
+  const { boardOneCards, boardTwoCards, boardOnePhase, boardTwoPhase } = getDualBoardDisplayState(
+    communityCards,
     phase,
     runoutPhase,
+    runoutStartPhase,
     currentRunIndex,
     firstBoard,
     secondBoard,
