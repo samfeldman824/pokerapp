@@ -11,3 +11,5 @@ test-results/*
 .sisyphus/boulder.json
 test-results/.last-run.json
 .vscode/settings.json
+docs/
+.DS_Store
